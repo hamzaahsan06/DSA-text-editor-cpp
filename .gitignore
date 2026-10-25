@@ -1,0 +1,89 @@
+# Compiled object files
+*.o
+*.obj
+*.ko
+*.elf
+
+# Precompiled headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+*.so
+*.so.*
+*.dll
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+TextEditor
+editor
+
+# Build directories
+build/
+bin/
+obj/
+out/
+Debug/
+Release/
+x64/
+x86/
+cmake-build-*/
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+*.ilk
+core
+core.*
+
+# IDE / Editor folders
+.vscode/
+.idea/
+*.code-workspace
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.cbp
+*.layout
+*.depend
+*.dev
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+*.log
+
+# Test output / sample saved documents (keep your tests/ inputs if needed)
+output/
+*.sav
