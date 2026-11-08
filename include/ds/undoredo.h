@@ -26,7 +26,8 @@ private:
 
     // Basis for (insert/erase/replace) all three operations in one function .
     bool splice(int pos, int count, const DocString& t) {
-        if (pos < 0 || count < 0 || pos + count > len) return false;
+        if (pos < 0 || pos > len || count < 0 || count > len - pos)
+    return false;
         int newLen = len - count + t.len;
         char* buf = new char[newLen + 1];
         int k = 0;
