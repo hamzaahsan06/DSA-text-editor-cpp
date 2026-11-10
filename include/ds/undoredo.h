@@ -1,7 +1,7 @@
 #ifndef UNDO_REDO_H
 #define UNDO_REDO_H
 
-#include "Stack.h"
+#include "ds/Stack.h"
 
 class DocString {
 private:
