@@ -14,7 +14,7 @@ private:
         return n;
     }
 
-    // Replace contents with a copy of s
+
     void set(const char* s, int n) {
         char* buf = new char[n + 1];
         for (int i = 0; i < n; ++i) buf[i] = s[i];
@@ -24,7 +24,7 @@ private:
         len = n;
     }
 
-    // Basis for (insert/erase/replace) all three operations in one function .
+    // Basis for (insert/erase/replace) all three operation(one function) .
     bool splice(int pos, int count, const DocString& t) {
         if (pos < 0 || pos > len || count < 0 || count > len - pos)
     return false;
@@ -110,14 +110,14 @@ public:
             case ERASE:   ok = document.insert(op.position, op.oldText); break;
             case REPLACE: ok = document.replace(op.position, op.newText.length(), op.oldText); break;
         }
-        if (!ok) return false;   // document untouched, stacks untouched 
+        if (!ok) return false;  
 
-        redoStack.push(op);      // cannot fail: isFull() checked above
+        redoStack.push(op);
         undoStack.pop(op);
         return true;
     }
 
-    // Re-apply the latest undone operation, then move it back to the undo stack.
+    // Re-apply the latest undone operation then move it back to the undo stack.
     bool redo(DocString& document) {
         Operation op(INSERT, 0, "", "");
         if (undoStack.isFull() || !redoStack.peek(op)) return false;
