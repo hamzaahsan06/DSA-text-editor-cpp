@@ -1,51 +1,48 @@
 #include "editor/UndoRedo.h"
 
+// Pushes op onto undoStack and clears redoStack. O(1).
 bool UndoRedo::record(Editor& ed, const Command& op) {
-    if (op.col < 0) return false;
+    if (op.line < 0 || op.col < 0) return false;
     if (!ed.undoStack.push(op)) return false;
     ed.redoStack.clear();
     return true;
 }
 
-bool UndoRedo::recordInsert(Editor& ed, int position, const std::string& text) {
+// Records an insert at (line, col). O(1).
+bool UndoRedo::recordInsert(Editor& ed, int line, int col, const std::string& text) {
     Command op;
     op.type = INSERT_TEXT;
-    op.line = 0;
-    op.col = position;
+    op.line = line;
+    op.col = col;
     op.oldText = "";
     op.newText = text;
-
-    // NEEDS: A line parameter or position-to-line/column mapping
-    // to support insertions beyond the first line.
     return record(ed, op);
 }
 
-bool UndoRedo::recordErase(Editor& ed, int position, const std::string& erasedText) {
+// Records an erase at (line, col). O(1).
+bool UndoRedo::recordErase(Editor& ed, int line, int col, const std::string& erasedText) {
     Command op;
     op.type = DELETE_TEXT;
-    op.line = 0;
-    op.col = position;
+    op.line = line;
+    op.col = col;
     op.oldText = erasedText;
     op.newText = "";
-
-    // NEEDS: A line parameter or position-to-line/column mapping
-    // to support deletions beyond the first line.
     return record(ed, op);
 }
 
-bool UndoRedo::recordReplace(Editor& ed, int position, const std::string& oldText, const std::string& newText) {
+// Records a replace at (line, col). O(1).
+bool UndoRedo::recordReplace(Editor& ed, int line, int col,
+                             const std::string& oldText, const std::string& newText) {
     Command op;
     op.type = REPLACE;
-    op.line = 0;
-    op.col = position;
+    op.line = line;
+    op.col = col;
     op.oldText = oldText;
     op.newText = newText;
-
-    // NEEDS: A line parameter or position-to-line/column mapping
-    // to support replacements beyond the first line.
     return record(ed, op);
 }
 
+// Reverts the most recent command. O(m).
 bool UndoRedo::undo(Editor& ed) {
     if (ed.undoStack.isEmpty() || ed.redoStack.isFull()) return false;
 
@@ -60,17 +57,32 @@ bool UndoRedo::undo(Editor& ed) {
     std::string& document = line->text;
 
     if (op.type == INSERT_TEXT) {
+        // Guard against out-of-range erase.
+        if (op.col < 0 || op.col + (int)op.newText.length() > (int)document.length()) {
+            ed.undoStack.push(op); // restore state
+            return false;
+        }
         document.erase(op.col, op.newText.length());
     } else if (op.type == DELETE_TEXT) {
+        if (op.col < 0 || op.col > (int)document.length()) {
+            ed.undoStack.push(op);
+            return false;
+        }
         document.insert(op.col, op.oldText);
     } else if (op.type == REPLACE) {
+        if (op.col < 0 || op.col + (int)op.newText.length() > (int)document.length()) {
+            ed.undoStack.push(op);
+            return false;
+        }
         document.replace(op.col, op.newText.length(), op.oldText);
     }
 
     ed.redoStack.push(op);
+    ed.setModified(true);
     return true;
 }
 
+// Reapplies the most recently undone command. O(m).
 bool UndoRedo::redo(Editor& ed) {
     if (ed.redoStack.isEmpty() || ed.undoStack.isFull()) return false;
 
@@ -85,25 +97,41 @@ bool UndoRedo::redo(Editor& ed) {
     std::string& document = line->text;
 
     if (op.type == INSERT_TEXT) {
+        if (op.col < 0 || op.col > (int)document.length()) {
+            ed.redoStack.push(op);
+            return false;
+        }
         document.insert(op.col, op.newText);
     } else if (op.type == DELETE_TEXT) {
+        if (op.col < 0 || op.col + (int)op.oldText.length() > (int)document.length()) {
+            ed.redoStack.push(op);
+            return false;
+        }
         document.erase(op.col, op.oldText.length());
     } else if (op.type == REPLACE) {
+        if (op.col < 0 || op.col + (int)op.oldText.length() > (int)document.length()) {
+            ed.redoStack.push(op);
+            return false;
+        }
         document.replace(op.col, op.oldText.length(), op.newText);
     }
 
     ed.undoStack.push(op);
+    ed.setModified(true);
     return true;
 }
 
+// True if there is at least one command to undo. O(1).
 bool UndoRedo::canUndo(const Editor& ed) const {
     return !ed.undoStack.isEmpty();
 }
 
+// True if there is at least one command to redo. O(1).
 bool UndoRedo::canRedo(const Editor& ed) const {
     return !ed.redoStack.isEmpty();
 }
 
+// Clears both history stacks. O(n).
 void UndoRedo::clearHistory(Editor& ed) {
     ed.undoStack.clear();
     ed.redoStack.clear();
