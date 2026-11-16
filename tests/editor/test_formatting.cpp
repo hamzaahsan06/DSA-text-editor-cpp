@@ -1,4 +1,4 @@
-//g++ -std=c++17 -Wall -Wextra -Iinclude tests/editor/test_Formatting.cpp src/editor/Formatting.cpp -o test_formatting.exe
+// g++ -std=c++17 -Wall -Wextra -Iinclude tests/editor/test_Formatting.cpp src/editor/Formatting.cpp -o test_formatting.exe
 
 //.\test_formatting.exe
 
@@ -8,16 +8,16 @@
 
 static int passed = 0, failed = 0;
 
-#define CHECK(cond) \
-    do \
-    { \
-        if (cond) \
-            ++passed; \
-        else \
-        { \
-            ++failed; \
+#define CHECK(cond)                                                   \
+    do                                                                \
+    {                                                                 \
+        if (cond)                                                     \
+            ++passed;                                                 \
+        else                                                          \
+        {                                                             \
+            ++failed;                                                 \
             std::cout << "FAIL line " << __LINE__ << ": " #cond "\n"; \
-        } \
+        }                                                             \
     } while (0)
 
 // Expected: A newly created Formatting object has no formatting spans.
