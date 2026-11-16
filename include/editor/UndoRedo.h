@@ -2,37 +2,25 @@
 #define UNDO_REDO_H
 
 #include <string>
-#include "ds/Stack.h"
+#include "editor/Types.h"
+#include "editor/Editor.h"
+
 // Basis for (insert/erase/replace) all three operation(one function) .
 class UndoRedo {
 private:
-    enum OperationType { INSERT, ERASE, REPLACE };
-
-    struct Operation {
-        OperationType type;
-        int position;
-        std::string oldText;
-        std::string newText;
-
-        Operation(OperationType t, int p, const std::string& oldT, const std::string& newT);
-    };
-
-    Stack<Operation> undoStack;
-    Stack<Operation> redoStack;
-
-    bool record(const Operation& op);
+    bool record(Editor& ed, const Command& op);
 
 public:
-    bool recordInsert(int position, const std::string& text);
-    bool recordErase(int position, const std::string& erasedText);
-    bool recordReplace(int position, const std::string& oldText, const std::string& newText);
+    bool recordInsert(Editor& ed, int position, const std::string& text);
+    bool recordErase(Editor& ed, int position, const std::string& erasedText);
+    bool recordReplace(Editor& ed, int position, const std::string& oldText, const std::string& newText);
 
-    bool undo(std::string& document);
-    bool redo(std::string& document);
+    bool undo(Editor& ed);
+    bool redo(Editor& ed);
 
-    bool canUndo() const;
-    bool canRedo() const;
-    void clearHistory();
+    bool canUndo(const Editor& ed) const;
+    bool canRedo(const Editor& ed) const;
+    void clearHistory(Editor& ed);
 };
 
 #endif

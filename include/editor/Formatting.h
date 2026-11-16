@@ -2,20 +2,11 @@
 #define FORMATTING_H
 
 #include <string>
+#include "editor/Types.h"
 #include "ds/DynamicArray.h"
 
 class Formatting {
 private:
-    struct FormatSpan {
-        int startCol;
-        int endCol;
-        bool isBold;
-        bool isItalic;
-
-        FormatSpan();
-        FormatSpan(int start, int end, bool bold, bool italic);
-    };
-
     DynamicArray<FormatSpan> spans;
 
 public:

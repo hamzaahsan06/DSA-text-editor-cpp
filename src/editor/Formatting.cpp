@@ -1,23 +1,21 @@
 #include "editor/Formatting.h"
 
-Formatting::FormatSpan::FormatSpan() {
-    startCol = 0;
-    endCol = 0;
-    isBold = false;
-    isItalic = false;
-}
-
-Formatting::FormatSpan::FormatSpan(int start, int end, bool bold, bool italic) {
-    startCol = start;
-    endCol = end;
-    isBold = bold;
-    isItalic = italic;
-}
-
 bool Formatting::addFormat(int startCol, int endCol, bool isBold, bool isItalic) {
     if (startCol < 0 || endCol < startCol) return false;
     if (!isBold && !isItalic) return false;
-    FormatSpan span(startCol, endCol, isBold, isItalic);
+
+    FormatSpan span;
+    span.startCol = startCol;
+    span.endCol = endCol;
+
+    if (isBold && isItalic) {
+        span.type = BOLD_ITALIC;
+    } else if (isBold) {
+        span.type = BOLD;
+    } else {
+        span.type = ITALIC;
+    }
+
     return spans.pushBack(span);
 }
 
@@ -45,9 +43,10 @@ std::string Formatting::applyFormatting(const std::string& lineText) const {
         for (int j = 0; j < spans.size(); ++j) {
             FormatSpan s;
             spans.get(j, s);
+
             if (i >= s.startCol && i <= s.endCol) {
-                if (s.isBold) bold = true;
-                if (s.isItalic) italic = true;
+                if (s.type == BOLD || s.type == BOLD_ITALIC) bold = true;
+                if (s.type == ITALIC || s.type == BOLD_ITALIC) italic = true;
             }
         }
 
