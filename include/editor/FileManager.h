@@ -3,12 +3,13 @@
 #define EDITOR_FILE_MANAGER_H
 
 #include <string>
-#include "ds/DoublyLinkedList.h"
+#include "editor/Editor.h"
+#include "editor/Types.h"
 
-bool newDocument(DoublyLinkedList<std::string>& doc, std::string& filename, bool& modified);
-bool openFile(DoublyLinkedList<std::string>& doc, std::string& filename, bool& modified, const std::string& path);
-bool saveFile(const DoublyLinkedList<std::string>& doc, const std::string& filename, bool& modified);
-bool saveFileAs(const DoublyLinkedList<std::string>& doc, std::string& filename, bool& modified, const std::string& path);
-bool exitEditor(bool modified);   
+bool newDocument(Editor& ed);
+bool openFile(Editor& ed, const std::string& path);
+bool saveFile(Editor& ed);
+bool saveFileAs(Editor& ed, const std::string& path);
+bool exitEditor(Editor& ed);
 
 #endif

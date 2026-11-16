@@ -5,18 +5,16 @@
 
 // Write every line to path, one per line. Returns false on any I/O error.
 // Walks nodes via getHead()/next so the whole save is O(n).
-static bool writeToFile(const DoublyLinkedList<std::string> &doc,
-                        const std::string &path)
+static bool writeToFile(Editor &ed, const std::string &path)
 {
-
     std::ofstream out(path.c_str());
     if (!out.is_open())
         return false;
 
-    typedef DoublyLinkedList<std::string>::Node Node;
-    for (Node *cur = doc.getHead(); cur != nullptr; cur = cur->next)
+    typedef DoublyLinkedList<Line>::Node Node;
+    for (Node *cur = ed.document.getHead(); cur != nullptr; cur = cur->next)
     {
-        out << cur->data;
+        out << cur->data.text;
         if (cur->next != nullptr)
             out << '\n';
     }
@@ -24,18 +22,15 @@ static bool writeToFile(const DoublyLinkedList<std::string> &doc,
     return out.good();
 }
 
-bool newDocument(DoublyLinkedList<std::string> &doc,
-                 std::string &filename, bool &modified)
+bool newDocument(Editor &ed)
 {
-    doc.clear();
-    filename.clear();
-    modified = false;
+    ed.document.clear();
+    ed.setFilename("");
+    ed.setModified(false);
     return true;
 }
 
-bool openFile(DoublyLinkedList<std::string> &doc,
-              std::string &filename, bool &modified,
-              const std::string &path)
+bool openFile(Editor &ed, const std::string &path)
 {
     if (path.empty())
     {
@@ -51,13 +46,16 @@ bool openFile(DoublyLinkedList<std::string> &doc,
     }
 
     // Read into a temporary list so a failed read never destroys the document.
-    DoublyLinkedList<std::string> temp;
-    std::string line;
-    while (std::getline(in, line))
+    DoublyLinkedList<Line> temp;
+    std::string lineText;
+    while (std::getline(in, lineText))
     {
-        if (!line.empty() && line[line.size() - 1] == '\r')
-            line.erase(line.size() - 1);
-        temp.insertAtTail(line);
+        if (!lineText.empty() && lineText[lineText.size() - 1] == '\r')
+            lineText.erase(lineText.size() - 1);
+        
+        Line l;
+        l.text = lineText;
+        temp.insertAtTail(l);
     }
     if (in.bad())
     {
@@ -65,49 +63,46 @@ bool openFile(DoublyLinkedList<std::string> &doc,
         return false;
     }
 
-    doc = temp;
-    filename = path;
-    modified = false;
+    ed.document = temp;
+    ed.setFilename(path);
+    ed.setModified(false);
     return true;
 }
 
-bool saveFile(const DoublyLinkedList<std::string> &doc,
-              const std::string &filename, bool &modified)
+bool saveFile(Editor &ed)
 {
-    if (filename.empty())
+    if (ed.getFilename().empty())
     {
         std::cout << "Error: no file name yet, use Save As.\n";
         return false;
     }
-    if (!writeToFile(doc, filename))
+    if (!writeToFile(ed, ed.getFilename()))
     {
-        std::cout << "Error: cannot write '" << filename << "'.\n";
+        std::cout << "Error: cannot write '" << ed.getFilename() << "'.\n";
         return false;
     }
-    modified = false;
+    ed.setModified(false);
     return true;
 }
 
-bool saveFileAs(const DoublyLinkedList<std::string> &doc,
-                std::string &filename, bool &modified,
-                const std::string &path)
+bool saveFileAs(Editor &ed, const std::string &path)
 {
     if (path.empty())
     {
         std::cout << "Error: no file name given.\n";
         return false;
     }
-    if (!writeToFile(doc, path))
+    if (!writeToFile(ed, path))
     {
         std::cout << "Error: cannot write '" << path << "'.\n";
         return false;
     }
-    filename = path;
-    modified = false;
+    ed.setFilename(path);
+    ed.setModified(false);
     return true;
 }
 
-bool exitEditor(bool modified)
+bool exitEditor(Editor &ed)
 {
-    return !modified;
+    return !ed.isModified();
 }
