@@ -5,22 +5,32 @@
 #include "editor/Types.h"
 #include "editor/Editor.h"
 
-// Basis for (insert/erase/replace) all three operation(one function) .
-class UndoRedo {
-private:
-    bool record(Editor& ed, const Command& op);
-
+// Records undoable commands and performs undo/redo on the document.
+class UndoRedo
+{
 public:
-    bool recordInsert(Editor& ed, int position, const std::string& text);
-    bool recordErase(Editor& ed, int position, const std::string& erasedText);
-    bool recordReplace(Editor& ed, int position, const std::string& oldText, const std::string& newText);
+    // Generic validated recorder: pushes op onto undoStack, clears redoStack. O(1).
+    bool record(Editor &ed, const Command &op);
 
-    bool undo(Editor& ed);
-    bool redo(Editor& ed);
+    // Records an insert at (line, col). O(1).
+    bool recordInsert(Editor &ed, int line, int col, const std::string &text);
 
-    bool canUndo(const Editor& ed) const;
-    bool canRedo(const Editor& ed) const;
-    void clearHistory(Editor& ed);
+    // Records an erase at (line, col). O(1).
+    bool recordErase(Editor &ed, int line, int col, const std::string &erasedText);
+
+    // Records a replace at (line, col). O(1).
+    bool recordReplace(Editor &ed, int line, int col,
+                       const std::string &oldText, const std::string &newText);
+
+    // Reverts the most recent command. O(m) where m = text touched.
+    bool undo(Editor &ed);
+
+    // Reapplies the most recently undone command. O(m).
+    bool redo(Editor &ed);
+
+    bool canUndo(const Editor &ed) const;
+    bool canRedo(const Editor &ed) const;
+    void clearHistory(Editor &ed);
 };
 
 #endif
