@@ -10,16 +10,16 @@ class Editor
 {
 public:
     // Core document data structures
-    DoublyLinkedList<Line> document;
-    Stack<Command> undoStack;
-    Stack<Command> redoStack;
-    DynamicArray<Bookmark> bookmarks;
+    DoublyLinkedList<Line> document;  // Document stored as a list of lines.
+    Stack<Command> undoStack;         // Undo history; top holds the last edit.
+    Stack<Command> redoStack;         // Redo history; populated when undoing.
+    DynamicArray<Bookmark> bookmarks; // User-saved named positions.
 
     // Editor state
-    int cursorLine = 0;
-    int cursorCol = 0;
-    std::string filename = "";
-    bool modified = false;
+    int cursorLine = 0;        // Current line index of the cursor.
+    int cursorCol = 0;         // Current column index within the cursor line.
+    std::string filename = ""; // Empty means the document is untitled.
+    bool modified = false;     // True if there are unsaved changes.
 
     // Constructor initializes the editor.
     Editor() { reset(); }
@@ -62,11 +62,9 @@ public:
         {
             return nullptr;
         }
-        // Since DoublyLinkedList::get() requires an out-parameter, we use a trick:
-        // we can't return a reference directly without modifying the ADT,
-        // so we check the head and walk (or we can just use the ADT's public traversal).
-        // Wait! DoublyLinkedList has getHead() and nodes are public.
-        // Let's use the public node traversal to get a pointer without copying.
+        // DoublyLinkedList::get() copies into an out-parameter, which is too
+        // expensive for editing. Walk the public node chain instead so callers
+        // receive a pointer to the live line stored in the list.
         DoublyLinkedList<Line>::Node *curr = document.getHead();
         for (int i = 0; i < index && curr != nullptr; ++i)
         {
