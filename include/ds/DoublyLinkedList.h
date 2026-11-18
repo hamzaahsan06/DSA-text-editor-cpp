@@ -1,132 +1,189 @@
 #ifndef DS_DOUBLY_LINKED_LIST_H
 #define DS_DOUBLY_LINKED_LIST_H
 
-// Generic doubly linked list; index traversal from nearest end.
+// Generic doubly linked list.
+// Index-based operations traverse from the nearest end (head or tail)
+// to keep access O(n/2) in the worst case.
 template <typename T>
-class DoublyLinkedList {
+class DoublyLinkedList
+{
 public:
-    struct Node {
+    // Node stores data plus links to both neighbors.
+    // Constructor links the node between n (next) and p (prev).
+    struct Node
+    {
         T data;
-        Node* next;
-        Node* prev;
-        Node(const T& d, Node* n, Node* p) : data(d), next(n), prev(p) {}
+        Node *next;
+        Node *prev;
+        Node(const T &d, Node *n, Node *p) : data(d), next(n), prev(p) {}
     };
 
 private:
-    Node* head;
-    Node* tail;
-    int count;
+    Node *head; // First node; nullptr when the list is empty.
+    Node *tail; // Last node; nullptr when the list is empty.
+    int count;  // Number of nodes currently stored.
 
-    // Find node at index, from nearest end. Returns nullptr if bad index.
-    Node* nodeAt(int index) const {
-        if (index < 0 || index >= count) return nullptr;
-        if (index < count / 2) {
-            Node* cur = head;
-            for (int i = 0; i < index; ++i) cur = cur->next;
+    // Returns the node at index, or nullptr if index is out of range.
+    // Chooses the closer end to minimize traversal steps.
+    Node *nodeAt(int index) const
+    {
+        if (index < 0 || index >= count)
+            return nullptr;
+        // Traverse forward from head for the first half.
+        if (index < count / 2)
+        {
+            Node *cur = head;
+            for (int i = 0; i < index; ++i)
+                cur = cur->next;
             return cur;
-        } else {
-            Node* cur = tail;
-            for (int i = count - 1; i > index; --i) cur = cur->prev;
+        }
+        // Traverse backward from tail for the second half.
+        else
+        {
+            Node *cur = tail;
+            for (int i = count - 1; i > index; --i)
+                cur = cur->prev;
             return cur;
         }
     }
 
 public:
+    // Constructs an empty list.
     DoublyLinkedList() : head(nullptr), tail(nullptr), count(0) {}
 
-    // Deep copy.
-    DoublyLinkedList(const DoublyLinkedList& other)
-        : head(nullptr), tail(nullptr), count(0) {
-        for (Node* cur = other.head; cur != nullptr; cur = cur->next) {
-            Node* n = new Node(cur->data, nullptr, tail);
-            if (tail) tail->next = n;
-            else head = n;
+    // Copy constructor: performs a deep copy of other,
+    // appending nodes in order so the new list is independent.
+    DoublyLinkedList(const DoublyLinkedList &other)
+        : head(nullptr), tail(nullptr), count(0)
+    {
+        for (Node *cur = other.head; cur != nullptr; cur = cur->next)
+        {
+            Node *n = new Node(cur->data, nullptr, tail);
+            if (tail)
+                tail->next = n;
+            else
+                head = n; // First node becomes head.
             tail = n;
         }
         count = other.count;
     }
 
-    // Deep copy assign.
-    DoublyLinkedList& operator=(const DoublyLinkedList& other) {
-        if (this == &other) return *this;
+    // Copy-assignment: self-assignment safe; clears existing nodes
+    // before deep-copying from other.
+    DoublyLinkedList &operator=(const DoublyLinkedList &other)
+    {
+        if (this == &other)
+            return *this;
         clear();
-        for (Node* cur = other.head; cur != nullptr; cur = cur->next) {
-            Node* n = new Node(cur->data, nullptr, tail);
-            if (tail) tail->next = n;
-            else head = n;
+        for (Node *cur = other.head; cur != nullptr; cur = cur->next)
+        {
+            Node *n = new Node(cur->data, nullptr, tail);
+            if (tail)
+                tail->next = n;
+            else
+                head = n; // First node becomes head.
             tail = n;
         }
         count = other.count;
         return *this;
     }
 
+    // Destructor releases all nodes.
     ~DoublyLinkedList() { clear(); }
 
-    // Insert at head.
-    bool insertAtHead(const T& value) {
-        Node* n = new Node(value, head, nullptr);
-        if (head) head->prev = n;
-        else tail = n;
+    // Inserts value at the front. Always succeeds.
+    bool insertAtHead(const T &value)
+    {
+        Node *n = new Node(value, head, nullptr);
+        if (head)
+            head->prev = n;
+        else
+            tail = n; // List was empty; new node is also the tail.
         head = n;
         ++count;
         return true;
     }
 
-    // Insert at tail.
-    bool insertAtTail(const T& value) {
-        Node* n = new Node(value, nullptr, tail);
-        if (tail) tail->next = n;
-        else head = n;
+    // Inserts value at the back. Always succeeds.
+    bool insertAtTail(const T &value)
+    {
+        Node *n = new Node(value, nullptr, tail);
+        if (tail)
+            tail->next = n;
+        else
+            head = n; // List was empty; new node is also the head.
         tail = n;
         ++count;
         return true;
     }
 
-    // Insert before index; valid range [0, size].
-    bool insertAtPosition(int index, const T& value) {
-        if (index < 0 || index > count) return false;
-        if (index == 0) return insertAtHead(value);
-        if (index == count) return insertAtTail(value);
-        Node* cur = nodeAt(index);
-        Node* n = new Node(value, cur, cur->prev);
+    // Inserts value before index. Valid range is [0, size];
+    // index == size appends at the tail. Returns false if out of range.
+    bool insertAtPosition(int index, const T &value)
+    {
+        if (index < 0 || index > count)
+            return false;
+        if (index == 0)
+            return insertAtHead(value);
+        if (index == count)
+            return insertAtTail(value);
+        // Insert before the node currently occupying index.
+        Node *cur = nodeAt(index);
+        Node *n = new Node(value, cur, cur->prev);
         cur->prev->next = n;
         cur->prev = n;
         ++count;
         return true;
     }
 
-    // Remove head into out-param.
-    bool removeHead(T& out) {
-        if (head == nullptr) return false;
-        Node* n = head;
+    // Removes the head node, storing its value in out.
+    // Returns false if the list is empty.
+    bool removeHead(T &out)
+    {
+        if (head == nullptr)
+            return false;
+        Node *n = head;
         out = n->data;
         head = n->next;
-        if (head) head->prev = nullptr;
-        else tail = nullptr;
+        if (head)
+            head->prev = nullptr;
+        else
+            tail = nullptr; // List became empty.
         delete n;
         --count;
         return true;
     }
 
-    // Remove tail into out-param.
-    bool removeTail(T& out) {
-        if (tail == nullptr) return false;
-        Node* n = tail;
+    // Removes the tail node, storing its value in out.
+    // Returns false if the list is empty.
+    bool removeTail(T &out)
+    {
+        if (tail == nullptr)
+            return false;
+        Node *n = tail;
         out = n->data;
         tail = n->prev;
-        if (tail) tail->next = nullptr;
-        else head = nullptr;
+        if (tail)
+            tail->next = nullptr;
+        else
+            head = nullptr; // List became empty.
         delete n;
         --count;
         return true;
     }
 
-    // Remove at index into out-param.
-    bool removeAtPosition(int index, T& out) {
-        if (index < 0 || index >= count) return false;
-        if (index == 0) return removeHead(out);
-        if (index == count - 1) return removeTail(out);
-        Node* cur = nodeAt(index);
+    // Removes the node at index, storing its value in out.
+    // Valid range is [0, size-1]; returns false if out of range.
+    bool removeAtPosition(int index, T &out)
+    {
+        if (index < 0 || index >= count)
+            return false;
+        if (index == 0)
+            return removeHead(out);
+        if (index == count - 1)
+            return removeTail(out);
+        // Unlink an interior node from both of its neighbors.
+        Node *cur = nodeAt(index);
         out = cur->data;
         cur->prev->next = cur->next;
         cur->next->prev = cur->prev;
@@ -135,33 +192,46 @@ public:
         return true;
     }
 
-    // Copy value at index into out-param.
-    bool get(int index, T& out) const {
-        Node* cur = nodeAt(index);
-        if (cur == nullptr) return false;
+    // Copies the value at index into out without modifying the list.
+    // Returns false if index is out of range.
+    bool get(int index, T &out) const
+    {
+        Node *cur = nodeAt(index);
+        if (cur == nullptr)
+            return false;
         out = cur->data;
         return true;
     }
 
-    // Overwrite value at index.
-    bool set(int index, const T& value) {
-        Node* cur = nodeAt(index);
-        if (cur == nullptr) return false;
+    // Overwrites the value at index with value.
+    // Returns false if index is out of range.
+    bool set(int index, const T &value)
+    {
+        Node *cur = nodeAt(index);
+        if (cur == nullptr)
+            return false;
         cur->data = value;
         return true;
     }
 
-    Node* getHead() const { return head; }
+    // Returns the first node (nullptr if empty).
+    Node *getHead() const { return head; }
 
-    Node* getTail() const { return tail; }
+    // Returns the last node (nullptr if empty).
+    Node *getTail() const { return tail; }
 
+    // Returns the number of nodes currently stored.
     int size() const { return count; }
 
+    // Returns true if the list contains no nodes.
     bool isEmpty() const { return count == 0; }
 
-    void clear() {
-        while (head != nullptr) {
-            Node* n = head;
+    // Removes and deletes all nodes, resetting the list to empty.
+    void clear()
+    {
+        while (head != nullptr)
+        {
+            Node *n = head;
             head = head->next;
             delete n;
         }
