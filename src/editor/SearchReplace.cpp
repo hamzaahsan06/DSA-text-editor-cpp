@@ -5,49 +5,128 @@
 #include "editor/Types.h"
 #include "editor/UndoRedo.h"
 
-// Finds first match of pattern in text at/after startPos; returns -1 if none. O(n*m).
+// Returns true if text contains pattern starting exactly at position pos.
+// Assumes pos is inside the string and pos + pattern.length() <= text.length().
+static bool matchesAt(const std::string &text, const std::string &pattern, int pos)
+{
+    int m = (int)pattern.length();
+    for (int j = 0; j < m; ++j)
+    {
+        if (text[pos + j] != pattern[j])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Returns true if a format span overlaps the column range [start, end).
+// Overlap means the span is not entirely before start or entirely after end.
+static bool spanOverlaps(const FormatSpan &span, int start, int end)
+{
+    if (span.endCol <= start)
+    {
+        return false;
+    }
+    if (span.startCol >= end)
+    {
+        return false;
+    }
+    return true;
+}
+
+// Rebuilds a line's format spans after replacing oldLen characters at
+// replaceCol with newLen characters. Spans entirely before the edit are
+// kept; spans entirely after it are shifted; spans overlapping the edit
+// are dropped, since their meaning is ambiguous.
+static void adjustFormatsAfterReplace(Line &line, int replaceCol,
+                                      int oldLen, int newLen)
+{
+    int delta = newLen - oldLen;
+    DynamicArray<FormatSpan> updated;
+
+    int total = line.formats.size();
+    for (int i = 0; i < total; ++i)
+    {
+        FormatSpan span;
+        if (!line.formats.get(i, span))
+        {
+            continue;
+        }
+        int editEnd = replaceCol + oldLen;
+        if (spanOverlaps(span, replaceCol, editEnd))
+        {
+            continue;
+        }
+        if (span.startCol >= editEnd)
+        {
+            span.startCol += delta;
+            span.endCol += delta;
+        }
+        updated.pushBack(span);
+    }
+    line.formats = updated;
+}
+
+// Returns the index of the first match of pattern in text at or after
+// startPos, or -1 if there is no match.
 int findSubstring(const std::string &text, const std::string &pattern, int startPos)
 {
-    if (pattern.empty())
+    if (pattern.length() == 0)
+    {
         return -1;
-    if (startPos < 0)
-        startPos = 0;
+    }
     int n = (int)text.length();
     int m = (int)pattern.length();
-    if (m > n - startPos)
+    if (startPos < 0)
+    {
+        startPos = 0;
+    }
+    if (startPos > n)
+    {
         return -1;
+    }
+    if (m > n - startPos)
+    {
+        return -1;
+    }
 
     for (int i = startPos; i <= n - m; ++i)
     {
-        int j = 0;
-        while (j < m && text[i + j] == pattern[j])
-            ++j;
-        if (j == m)
+        if (matchesAt(text, pattern, i))
+        {
             return i;
+        }
     }
     return -1;
 }
 
-// Collects every match (overlapping included) across all lines. O(L*n*m).
+// Collects every match (including overlapping ones) across all lines.
 DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
 {
     DynamicArray<Position> results;
-    if (pattern.empty())
+    if (pattern.length() == 0)
+    {
         return results;
+    }
 
     int lines = ed.getLineCount();
     for (int li = 0; li < lines; ++li)
     {
         Line *line = ed.getLine(li);
         if (line == nullptr)
+        {
             continue;
+        }
 
         int start = 0;
         while (true)
         {
             int idx = findSubstring(line->text, pattern, start);
             if (idx < 0)
+            {
                 break;
+            }
             Position p;
             p.line = li;
             p.col = idx;
@@ -58,27 +137,31 @@ DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
     return results;
 }
 
-// Returns true if the pattern occurs at least once. O(L*n*m).
+// Returns true if the pattern occurs at least once anywhere in the document.
 bool containsText(Editor &ed, const std::string &pattern)
 {
-    if (pattern.empty())
+    if (pattern.length() == 0)
+    {
         return false;
-    if (ed.getLineCount() == 0)
-        return false;
-
+    }
     int lines = ed.getLineCount();
     for (int li = 0; li < lines; ++li)
     {
         Line *line = ed.getLine(li);
         if (line == nullptr)
+        {
             continue;
+        }
         if (findSubstring(line->text, pattern, 0) >= 0)
+        {
             return true;
+        }
     }
     return false;
 }
 
-// Prints "Not found" or "Found N occurrence(s):" then 1-based positions. O(N).
+// Prints search results: a "Not found" message, or the count and each
+// 1-based position.
 void displaySearchResults(const DynamicArray<Position> &results, std::ostream &out)
 {
     int count = results.size();
@@ -95,119 +178,143 @@ void displaySearchResults(const DynamicArray<Position> &results, std::ostream &o
     }
 }
 
-// Replaces the nth match (1-based); records REPLACE via UndoRedo. O(L*n*m + n).
-bool replaceOccurrence(Editor &ed, const std::string &pattern, const std::string &newStr, int n)
+// Builds the text that results from replacing the range
+// [replaceCol, replaceCol + oldLen) of source with newText.
+static std::string buildReplacedText(const std::string &source, int replaceCol,
+                                     int oldLen, const std::string &newText)
 {
-    if (pattern.empty())
+    std::string result = source.substr(0, replaceCol);
+    result += newText;
+    result += source.substr(replaceCol + oldLen);
+    return result;
+}
+
+// Replaces the nth match (1-based) of pattern with newStr. Records the
+// change through UndoRedo and adjusts the line's format spans.
+bool replaceOccurrence(Editor &ed, const std::string &pattern,
+                       const std::string &newStr, int n)
+{
+    if (pattern.length() == 0)
+    {
         return false;
+    }
     if (n < 1)
+    {
         return false;
-    if (ed.getLineCount() == 0)
+    }
+    int lines = ed.getLineCount();
+    if (lines == 0)
+    {
         return false;
+    }
 
     UndoRedo undoRedo;
     int seen = 0;
-    int lines = ed.getLineCount();
 
     for (int li = 0; li < lines; ++li)
     {
         Line *line = ed.getLine(li);
         if (line == nullptr)
+        {
             continue;
+        }
 
         int start = 0;
         while (true)
         {
             int idx = findSubstring(line->text, pattern, start);
             if (idx < 0)
+            {
                 break;
+            }
             ++seen;
             if (seen == n)
             {
-                // Build replacement string.
-                std::string result;
-                result.reserve(line->text.length() - pattern.length() + newStr.length());
-                for (int k = 0; k < idx; ++k)
-                    result += line->text[k];
-                result += newStr;
-                for (int k = idx + (int)pattern.length(); k < (int)line->text.length(); ++k)
-                    result += line->text[k];
-
-                // Record BEFORE mutating (oldText = pattern, newText = newStr).
+                std::string updated = buildReplacedText(
+                    line->text, idx, (int)pattern.length(), newStr);
                 if (!undoRedo.recordReplace(ed, li, idx, pattern, newStr))
+                {
                     return false;
-
-                line->text = result;
-
-                // TODO: shift format spans
-                // (line length changed; format spans after idx may need adjusting.)
-
+                }
+                adjustFormatsAfterReplace(*line, idx, (int)pattern.length(),
+                                          (int)newStr.length());
+                line->text = updated;
                 ed.setModified(true);
                 return true;
             }
-            start = idx + 1; // allow overlapping matches to match searchAll semantics
+            start = idx + 1; // overlapping matches, matching searchAll
         }
     }
     return false;
 }
 
-// Replaces all matches left-to-right; returns count. Safe when newStr contains pattern.
-// O(L*n*m + R*n).
+// Replaces every non-overlapping match left to right. Returns the number
+// of replacements. The scan advances past the inserted text so newStr
+// containing pattern cannot cause an infinite loop.
 int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr)
 {
-    if (pattern.empty())
+    if (pattern.length() == 0)
+    {
         return 0;
-    if (ed.getLineCount() == 0)
+    }
+    int lines = ed.getLineCount();
+    if (lines == 0)
+    {
         return 0;
+    }
 
     UndoRedo undoRedo;
     int total = 0;
-    int lines = ed.getLineCount();
 
     for (int li = 0; li < lines; ++li)
     {
         Line *line = ed.getLine(li);
         if (line == nullptr)
+        {
             continue;
+        }
 
-        std::string src = line->text;
-        std::string out;
-        out.reserve(src.length());
-
+        std::string source = line->text;
+        std::string rebuilt;
         int start = 0;
         int replacedOnThisLine = 0;
+        bool recordFailed = false;
+
         while (true)
         {
-            int idx = findSubstring(src, pattern, start);
+            int idx = findSubstring(source, pattern, start);
             if (idx < 0)
             {
-                for (int k = start; k < (int)src.length(); ++k)
-                    out += src[k];
+                rebuilt += source.substr(start);
                 break;
             }
 
-            for (int k = start; k < idx; ++k)
-                out += src[k];
+            rebuilt += source.substr(start, idx - start);
 
-            // Record each replacement through UndoRedo.
             if (!undoRedo.recordReplace(ed, li, idx, pattern, newStr))
+            {
+                recordFailed = true;
                 break;
+            }
 
-            for (int k = 0; k < (int)newStr.length(); ++k)
-                out += newStr[k];
-
+            rebuilt += newStr;
             ++total;
             ++replacedOnThisLine;
-
-            // Continue AFTER the inserted text to avoid infinite loops.
             start = idx + (int)pattern.length();
+        }
+
+        if (recordFailed)
+        {
+            // Document is unchanged for this line; stop to keep undo
+            // history consistent with the text.
+            break;
         }
 
         if (replacedOnThisLine > 0)
         {
-            line->text = out;
-            // TODO: shift format spans
-            // (line length changed; format spans may need adjusting.)
+            adjustFormatsAfterReplace(*line, 0, (int)source.length(),
+                                      (int)rebuilt.length());
+            line->text = rebuilt;
         }
     }
 
