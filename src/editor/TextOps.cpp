@@ -6,17 +6,20 @@
 #include "editor/Bookmarks.h"
 
 // True for space, tab, newline, carriage return, vertical tab and form feed.
-static bool isWhitespace(char c) {
+static bool isWhitespace(char c)
+{
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
 }
 
-// Prints an error and returns false if the document is empty or line does not exist.
-static bool requireLine(const Editor& ed, int line) {
-    if (isDocumentEmpty(ed)) {
+static bool requireLine(const Editor &ed, int line)
+{
+    if (isDocumentEmpty(ed))
+    {
         std::cout << "Error: the document is empty.\n";
         return false;
     }
-    if (!isValidLine(ed, line)) {
+    if (!isValidLine(ed, line))
+    {
         std::cout << "Error: line " << (line + 1) << " does not exist (document has "
                   << ed.document.size() << " lines).\n";
         return false;
@@ -24,21 +27,22 @@ static bool requireLine(const Editor& ed, int line) {
     return true;
 }
 
-// Prints an error and returns false if col is not 0..length of the line.
-static bool requireColumn(const Editor& ed, int line, int col) {
-    if (!isValidColumn(ed, line, col)) {
+static bool requireColumn(const Editor &ed, int line, int col)
+{
+    if (!isValidColumn(ed, line, col))
+    {
         std::cout << "Error: column " << (col + 1) << " is outside line " << (line + 1) << ".\n";
         return false;
     }
     return true;
 }
 
-// For the two insert functions. A document with no lines accepts only (0, 0):
-// one empty line is created first so there is something to insert into.
-// Returns false (and changes nothing) for any other position.
-static bool openEmptyDocument(Editor& ed, int line, int col) {
-    if (!isDocumentEmpty(ed)) return true;
-    if (line != 0 || col != 0) {
+static bool openEmptyDocument(Editor &ed, int line, int col)
+{
+    if (!isDocumentEmpty(ed))
+        return true;
+    if (line != 0 || col != 0)
+    {
         std::cout << "Error: the document is empty; insert at line 1, column 1.\n";
         return false;
     }
@@ -47,29 +51,87 @@ static bool openEmptyDocument(Editor& ed, int line, int col) {
     return true;
 }
 
-static void moveCursor(Editor& ed, int line, int col) {
+static void moveCursor(Editor &ed, int line, int col)
+{
     ed.cursorLine = line;
     ed.cursorCol = col;
 }
 
-// NOTE: formatting spans (Line::formats) are not shifted here. Formatting is
-// not connected to Line::formats yet; add the shifting where marked once it is.
+// Shift spans to the right on insert.
+static void shiftSpansOnInsert(Line &line, int col, int length)
+{
+    for (int i = 0; i < line.formats.size(); ++i)
+    {
+        FormatSpan span;
+        if (!line.formats.get(i, span))
+            continue;
+        if (span.startCol >= col)
+            span.startCol += length;
+        if (span.endCol >= col)
+            span.endCol += length;
+        line.formats.set(i, span);
+    }
+}
 
-bool insertText(Editor& ed, int line, int col, const std::string& text) {
-    if (isEmptyString(text)) {
+// Shift/shrink spans on delete.
+static void shiftSpansOnDelete(Line &line, int startCol, int endCol)
+{
+    int length = endCol - startCol;
+    for (int i = 0; i < line.formats.size(); ++i)
+    {
+        FormatSpan span;
+        if (!line.formats.get(i, span))
+            continue;
+
+        if (span.startCol >= endCol)
+        {
+            span.startCol -= length;
+            span.endCol -= length;
+            line.formats.set(i, span);
+        }
+        else if (span.endCol > startCol)
+        {
+            if (span.startCol >= startCol)
+                span.startCol = startCol;
+            if (span.endCol <= endCol)
+                span.endCol = startCol;
+            else
+                span.endCol -= length;
+
+            if (span.startCol >= span.endCol)
+            {
+                FormatSpan dummy;
+                line.formats.removeAt(i, dummy);
+                --i;
+            }
+            else
+            {
+                line.formats.set(i, span);
+            }
+        }
+    }
+}
+
+bool insertText(Editor &ed, int line, int col, const std::string &text)
+{
+    if (isEmptyString(text))
+    {
         std::cout << "Error: there is no text to insert.\n";
         return false;
     }
-    if (text.find('\n') != std::string::npos) {
+    if (text.find('\n') != std::string::npos)
+    {
         std::cout << "Error: text cannot contain a newline; use insert new line.\n";
         return false;
     }
-    if (!openEmptyDocument(ed, line, col)) return false;
-    if (!requireLine(ed, line) || !requireColumn(ed, line, col)) return false;
+    if (!openEmptyDocument(ed, line, col))
+        return false;
+    if (!requireLine(ed, line) || !requireColumn(ed, line, col))
+        return false;
 
-    Line* target = ed.getLine(line);
+    Line *target = ed.getLine(line);
     target->text.insert(col, text);
-    // (shift formatting spans on this line here)
+    shiftSpansOnInsert(*target, col, static_cast<int>(text.size()));
 
     UndoRedo history;
     history.recordInsert(ed, line, col, text);
@@ -79,24 +141,31 @@ bool insertText(Editor& ed, int line, int col, const std::string& text) {
     return true;
 }
 
-bool insertNewLine(Editor& ed, int line, int col) {
-    if (!openEmptyDocument(ed, line, col)) return false;
-    if (!requireLine(ed, line) || !requireColumn(ed, line, col)) return false;
+bool insertNewLine(Editor &ed, int line, int col)
+{
+    if (!openEmptyDocument(ed, line, col))
+        return false;
+    if (!requireLine(ed, line) || !requireColumn(ed, line, col))
+        return false;
 
-    // Left part stays on this line; the right part becomes a new line below.
-    Line* target = ed.getLine(line);
+    Line *target = ed.getLine(line);
+    std::string originalText = target->text;
+
     Line below;
     below.text = target->text.substr(col);
     target->text.erase(col);
     ed.document.insertAtPosition(line + 1, below);
     adjustBookmarksOnLineInsert(ed, line + 1);
 
-    // Encoding: line = the line that was split, col = where it was split.
+    // We record a single INSERT_LINE command.
+    // op.line = the original line.
+    // op.newText = the full original text (used to merge back on undo).
+    UndoRedo history;
     Command op;
     op.type = INSERT_LINE;
     op.line = line;
     op.col = col;
-    UndoRedo history;
+    op.newText = originalText;
     history.record(ed, op);
 
     ed.setModified(true);
@@ -104,22 +173,26 @@ bool insertNewLine(Editor& ed, int line, int col) {
     return true;
 }
 
-bool deleteText(Editor& ed, int line, int startCol, int endCol) {
-    if (!requireLine(ed, line)) return false;
-    if (!isValidColumnRange(ed, line, startCol, endCol)) {
+bool deleteText(Editor &ed, int line, int startCol, int endCol)
+{
+    if (!requireLine(ed, line))
+        return false;
+    if (!isValidColumnRange(ed, line, startCol, endCol))
+    {
         std::cout << "Error: columns " << (startCol + 1) << " to " << endCol
                   << " are not inside line " << (line + 1) << ".\n";
         return false;
     }
-    if (startCol == endCol) {
+    if (startCol == endCol)
+    {
         std::cout << "Error: nothing to delete (empty range).\n";
         return false;
     }
 
-    Line* target = ed.getLine(line);
+    Line *target = ed.getLine(line);
     std::string removed = target->text.substr(startCol, endCol - startCol);
     target->text.erase(startCol, endCol - startCol);
-    // (shift formatting spans on this line here)
+    shiftSpansOnDelete(*target, startCol, endCol);
 
     UndoRedo history;
     history.recordErase(ed, line, startCol, removed);
@@ -129,11 +202,14 @@ bool deleteText(Editor& ed, int line, int startCol, int endCol) {
     return true;
 }
 
-bool deleteChar(Editor& ed, int line, int col) {
-    if (!requireLine(ed, line)) return false;
+bool deleteChar(Editor &ed, int line, int col)
+{
+    if (!requireLine(ed, line))
+        return false;
 
     int length = static_cast<int>(ed.getLine(line)->text.size());
-    if (col < 0 || col >= length) {
+    if (col < 0 || col >= length)
+    {
         std::cout << "Error: there is no character at column " << (col + 1)
                   << " of line " << (line + 1) << ".\n";
         return false;
@@ -141,57 +217,70 @@ bool deleteChar(Editor& ed, int line, int col) {
     return deleteText(ed, line, col, col + 1);
 }
 
-bool deleteWord(Editor& ed, int line, int col) {
-    if (!requireLine(ed, line)) return false;
+bool deleteWord(Editor &ed, int line, int col)
+{
+    if (!requireLine(ed, line))
+        return false;
 
-    const std::string& text = ed.getLine(line)->text;
+    const std::string &text = ed.getLine(line)->text;
     int length = static_cast<int>(text.size());
-    if (col < 0 || col >= length || isWhitespace(text[col])) {
+    if (col < 0 || col >= length || isWhitespace(text[col]))
+    {
         std::cout << "Error: there is no word at line " << (line + 1)
                   << ", column " << (col + 1) << ".\n";
         return false;
     }
 
     int start = col;
-    while (start > 0 && !isWhitespace(text[start - 1])) --start;
+    while (start > 0 && !isWhitespace(text[start - 1]))
+        --start;
     int end = col;
-    while (end < length && !isWhitespace(text[end])) ++end;
+    while (end < length && !isWhitespace(text[end]))
+        ++end;
 
     return deleteText(ed, line, start, end);
 }
 
-bool deleteLines(Editor& ed, int startLine, int endLine) {
-    if (isDocumentEmpty(ed)) {
+bool deleteLines(Editor &ed, int startLine, int endLine)
+{
+    if (isDocumentEmpty(ed))
+    {
         std::cout << "Error: the document is empty.\n";
         return false;
     }
-    if (!isValidRange(ed, startLine, endLine)) {
+    if (!isValidRange(ed, startLine, endLine))
+    {
         std::cout << "Error: lines " << (startLine + 1) << " to " << (endLine + 1)
                   << " are not a valid range (document has " << ed.document.size()
                   << " lines).\n";
         return false;
     }
 
-    // The lines below slide up after each removal, so always remove at
-    // startLine. Each removed line is kept for undo, joined with '\n'.
-    int count = endLine - startLine + 1;
+    // Gather the text BEFORE removing the lines.
     std::string removedText;
-    for (int i = 0; i < count; ++i) {
-        Line removed;
-        ed.document.removeAtPosition(startLine, removed);
-        if (i > 0) removedText += '\n';
-        removedText += removed.text;
-        adjustBookmarksOnLineDelete(ed, startLine);
+    for (int i = startLine; i <= endLine; ++i)
+    {
+        Line *l = ed.getLine(i);
+        if (l != nullptr)
+        {
+            if (i > startLine)
+                removedText += '\n';
+            removedText += l->text;
+        }
     }
 
-    // Encoding: line = first deleted line, oldText = deleted lines joined by '\n'.
-    Command op;
-    op.type = DELETE_LINE;
-    op.line = startLine;
-    op.col = 0;
-    op.oldText = removedText;
     UndoRedo history;
-    history.record(ed, op);
+    // recordDeleteLine checks that line < getLineCount()
+    if (!history.recordDeleteLine(ed, startLine, removedText))
+        return false;
+
+    int count = endLine - startLine + 1;
+    for (int i = 0; i < count; ++i)
+    {
+        Line removed;
+        ed.document.removeAtPosition(startLine, removed);
+        adjustBookmarksOnLineDelete(ed, startLine);
+    }
 
     ed.setModified(true);
     int remaining = ed.document.size();
