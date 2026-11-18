@@ -6,6 +6,10 @@
 #include "editor/Types.h"
 #include "ds/DynamicArray.h"
 
+// Bookmarks: named cursor positions stored in a DynamicArray.
+// Bookmarks move with the text (they track content, not fixed numbers),
+// and are NOT part of undo/redo and do NOT mark the editor as modified.
+
 // Adds a named bookmark at (line, col). Rejects bad names, duplicates, bad ranges.
 bool addBookmark(Editor &ed, const std::string &name, int line, int col);
 
@@ -24,10 +28,10 @@ bool gotoBookmark(Editor &ed, const std::string &name);
 // Jumps to the bookmark at the given 0-based index.
 bool gotoBookmarkByIndex(Editor &ed, int index);
 
-// Stores the current cursor under "__previous" (replaces if already present).
+// Stores the current cursor under the reserved previous-position slot.
 bool savePreviousPosition(Editor &ed);
 
-// Jumps to "__previous". Returns false if it does not exist.
+// Jumps to the previous-position slot. Returns false if it does not exist.
 bool returnToPreviousPosition(Editor &ed);
 
 // Returns the number of bookmarks.
