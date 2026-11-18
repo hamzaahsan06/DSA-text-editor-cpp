@@ -1,23 +1,23 @@
 // g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_SearchReplace.cpp src/editor/SearchReplace.cpp src/editor/UndoRedo.cpp -o build/test_SearchReplace ; if ($?) { ./build/test_SearchReplace }
 
 #include <iostream>
+#include <sstream>
 #include <string>
 #include "editor/SearchReplace.h"
 #include "editor/UndoRedo.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
+#include "../ds/check.h"
 
-static int passed = 0, failed = 0;
-#define CHECK(cond) do { if (cond) ++passed; else { ++failed; \
-    std::cout << "FAIL line " << __LINE__ << ": " #cond "\n"; } } while (0)
-
-// Fills `ed` with the given lines (replaces the default first line).
-// Editor is non-copyable, so we build it in place via a reference out-parameter.
-static void makeEditorWith(const std::string* lines, int n, Editor& ed)
+// Fills `ed` with the given lines. Editor is non-copyable, so fill in place.
+static void makeEditorWith(const std::string *lines, int n, Editor &ed)
 {
-    if (n <= 0) return;
-    Line* first = ed.getLine(0);
-    if (first != nullptr) first->text = lines[0];
+    ed.reset();
+    if (n <= 0)
+        return;
+    Line *first = ed.getLine(0);
+    if (first != nullptr)
+        first->text = lines[0];
     for (int i = 1; i < n; ++i)
     {
         Line l;
@@ -93,8 +93,9 @@ void test_find_case_sensitive()
 // Empty pattern yields empty results.
 void test_search_all_empty_pattern()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     DynamicArray<Position> r = searchAll(ed, "");
     CHECK(r.size() == 0);
 }
@@ -111,8 +112,9 @@ void test_search_all_empty_document()
 // No matches yields empty results.
 void test_search_all_no_match()
 {
-    const std::string lines[] = { "abc", "def" };
-    Editor ed; makeEditorWith(lines, 2, ed);
+    const std::string lines[] = {"abc", "def"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
     DynamicArray<Position> r = searchAll(ed, "zzz");
     CHECK(r.size() == 0);
 }
@@ -120,8 +122,9 @@ void test_search_all_no_match()
 // Single match reports the right line and column.
 void test_search_all_single_match()
 {
-    const std::string lines[] = { "hello" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"hello"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     DynamicArray<Position> r = searchAll(ed, "llo");
     CHECK(r.size() == 1);
     if (r.size() == 1)
@@ -134,8 +137,9 @@ void test_search_all_single_match()
 // Matches are collected line-by-line across multiple lines.
 void test_search_all_multi_line()
 {
-    const std::string lines[] = { "aa", "xaa", "aaa" };
-    Editor ed; makeEditorWith(lines, 3, ed);
+    const std::string lines[] = {"aa", "xaa", "aaa"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
     DynamicArray<Position> r = searchAll(ed, "aa");
     CHECK(r.size() == 4);
     CHECK(r[0].line == 0 && r[0].col == 0);
@@ -147,8 +151,9 @@ void test_search_all_multi_line()
 // Overlapping matches are counted ("aa" in "aaa" -> 2).
 void test_search_all_overlapping()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     DynamicArray<Position> r = searchAll(ed, "aa");
     CHECK(r.size() == 2);
     if (r.size() == 2)
@@ -161,11 +166,13 @@ void test_search_all_overlapping()
 // Case-sensitive search.
 void test_search_all_case_sensitive()
 {
-    const std::string lines[] = { "ABCabc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"ABCabc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     DynamicArray<Position> r = searchAll(ed, "abc");
     CHECK(r.size() == 1);
-    if (r.size() == 1) CHECK(r[0].col == 3);
+    if (r.size() == 1)
+        CHECK(r[0].col == 3);
 }
 
 // ---------- containsText ----------
@@ -173,8 +180,9 @@ void test_search_all_case_sensitive()
 // Empty pattern returns false.
 void test_contains_empty_pattern()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(containsText(ed, "") == false);
 }
 
@@ -189,46 +197,59 @@ void test_contains_empty_document()
 // Match present returns true.
 void test_contains_present()
 {
-    const std::string lines[] = { "hello world" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"hello world"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(containsText(ed, "world") == true);
 }
 
 // Absent pattern returns false.
 void test_contains_absent()
 {
-    const std::string lines[] = { "hello" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"hello"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(containsText(ed, "xyz") == false);
 }
 
 // Match on a later line returns true.
 void test_contains_on_later_line()
 {
-    const std::string lines[] = { "aaa", "bbb", "target" };
-    Editor ed; makeEditorWith(lines, 3, ed);
+    const std::string lines[] = {"aaa", "bbb", "target"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
     CHECK(containsText(ed, "target") == true);
 }
 
 // ---------- displaySearchResults ----------
-// No <sstream>: we only assert the function does not crash.
 
-// Empty results: displaySearchResults must not crash.
-void test_display_empty_does_not_crash()
+// Empty results prints "Not found".
+void test_display_not_found()
 {
     DynamicArray<Position> r;
-    displaySearchResults(r, std::cout);
-    CHECK(true);
+    std::ostringstream out;
+    displaySearchResults(r, out);
+    CHECK(out.str() == "Not found\n");
 }
 
-// Non-empty results: displaySearchResults must not crash.
-void test_display_nonempty_does_not_crash()
+// Non-empty results prints count and 1-based positions.
+void test_display_found()
 {
     DynamicArray<Position> r;
-    Position p1; p1.line = 0; p1.col = 0; r.pushBack(p1);
-    Position p2; p2.line = 2; p2.col = 5; r.pushBack(p2);
-    displaySearchResults(r, std::cout);
-    CHECK(true);
+    Position p1;
+    p1.line = 0;
+    p1.col = 0;
+    r.pushBack(p1);
+    Position p2;
+    p2.line = 2;
+    p2.col = 5;
+    r.pushBack(p2);
+    std::ostringstream out;
+    displaySearchResults(r, out);
+    CHECK(out.str() ==
+          "Found 2 occurrence(s):\n"
+          "Line 1, Column 1\n"
+          "Line 3, Column 6\n");
 }
 
 // ---------- replaceOccurrence ----------
@@ -236,8 +257,9 @@ void test_display_nonempty_does_not_crash()
 // Empty pattern returns false.
 void test_replace_occ_empty_pattern()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "", "X", 1) == false);
     CHECK(ed.getLine(0)->text == "abc");
 }
@@ -245,8 +267,9 @@ void test_replace_occ_empty_pattern()
 // n < 1 returns false.
 void test_replace_occ_bad_n()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "a", "X", 0) == false);
     CHECK(replaceOccurrence(ed, "a", "X", -1) == false);
     CHECK(ed.getLine(0)->text == "abc");
@@ -263,8 +286,9 @@ void test_replace_occ_empty_document()
 // Fewer matches than n returns false and does not modify.
 void test_replace_occ_too_few_matches()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "a", "X", 2) == false);
     CHECK(ed.getLine(0)->text == "abc");
 }
@@ -272,17 +296,19 @@ void test_replace_occ_too_few_matches()
 // Replaces the first match.
 void test_replace_occ_first()
 {
-    const std::string lines[] = { "banana" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"banana"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "an", "X", 1) == true);
     CHECK(ed.getLine(0)->text == "bXana");
 }
 
-// Replaces the second match.
+// Replaces the second match (overlapping-search semantics).
 void test_replace_occ_second()
 {
-    const std::string lines[] = { "banana" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"banana"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "an", "X", 2) == true);
     CHECK(ed.getLine(0)->text == "banXa");
 }
@@ -290,8 +316,9 @@ void test_replace_occ_second()
 // Replaces a match on a later line.
 void test_replace_occ_on_later_line()
 {
-    const std::string lines[] = { "aaa", "bbb", "target" };
-    Editor ed; makeEditorWith(lines, 3, ed);
+    const std::string lines[] = {"aaa", "bbb", "target"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
     CHECK(replaceOccurrence(ed, "target", "HIT", 1) == true);
     CHECK(ed.getLine(0)->text == "aaa");
     CHECK(ed.getLine(1)->text == "bbb");
@@ -301,8 +328,9 @@ void test_replace_occ_on_later_line()
 // Empty newStr deletes the match.
 void test_replace_occ_with_empty_new()
 {
-    const std::string lines[] = { "abcabc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abcabc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceOccurrence(ed, "bc", "", 1) == true);
     CHECK(ed.getLine(0)->text == "aabc");
 }
@@ -310,8 +338,9 @@ void test_replace_occ_with_empty_new()
 // Sets modified flag and records one REPLACE command.
 void test_replace_occ_records_and_modifies()
 {
-    const std::string lines[] = { "abcabc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abcabc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     ed.setModified(false);
     CHECK(replaceOccurrence(ed, "bc", "X", 1) == true);
     CHECK(ed.isModified() == true);
@@ -328,8 +357,9 @@ void test_replace_occ_records_and_modifies()
 // Undo after replaceOccurrence restores the original text.
 void test_replace_occ_undo_restores()
 {
-    const std::string lines[] = { "banana" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"banana"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     UndoRedo ur;
     CHECK(replaceOccurrence(ed, "an", "X", 2) == true);
     CHECK(ed.getLine(0)->text == "banXa");
@@ -337,13 +367,49 @@ void test_replace_occ_undo_restores()
     CHECK(ed.getLine(0)->text == "banana");
 }
 
+// Replaces formats that overlap the edit are dropped; later formats shift.
+void test_replace_occ_adjusts_formats()
+{
+    const std::string lines[] = {"abcdef"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    Line *l = ed.getLine(0);
+
+    FormatSpan s1;
+    s1.startCol = 0;
+    s1.endCol = 2;
+    s1.type = BOLD;
+    FormatSpan s2;
+    s2.startCol = 2;
+    s2.endCol = 4;
+    s2.type = ITALIC;
+    FormatSpan s3;
+    s3.startCol = 4;
+    s3.endCol = 6;
+    s3.type = BOLD_ITALIC;
+    l->formats.pushBack(s1);
+    l->formats.pushBack(s2);
+    l->formats.pushBack(s3);
+
+    // Replace "cd" (cols 2..4) with "XYZ" (length 3) -> delta +1.
+    CHECK(replaceOccurrence(ed, "cd", "XYZ", 1) == true);
+    CHECK(l->text == "abXYZef");
+    CHECK(l->formats.size() == 2);
+    FormatSpan out1, out2;
+    CHECK(l->formats.get(0, out1));
+    CHECK(l->formats.get(1, out2));
+    CHECK(out1.startCol == 0 && out1.endCol == 2);
+    CHECK(out2.startCol == 5 && out2.endCol == 7);
+}
+
 // ---------- replaceAll ----------
 
 // Empty pattern returns 0 and does not modify.
 void test_replace_all_empty_pattern()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "", "X") == 0);
     CHECK(ed.getLine(0)->text == "abc");
 }
@@ -359,8 +425,9 @@ void test_replace_all_empty_document()
 // No matches returns 0 and does not modify.
 void test_replace_all_no_match()
 {
-    const std::string lines[] = { "abc" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "zzz", "X") == 0);
     CHECK(ed.getLine(0)->text == "abc");
 }
@@ -368,8 +435,9 @@ void test_replace_all_no_match()
 // Replaces every non-overlapping occurrence.
 void test_replace_all_basic()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "a", "b") == 3);
     CHECK(ed.getLine(0)->text == "bbb");
 }
@@ -377,8 +445,9 @@ void test_replace_all_basic()
 // Replaces matches on multiple lines.
 void test_replace_all_multi_line()
 {
-    const std::string lines[] = { "cat", "dog", "cat" };
-    Editor ed; makeEditorWith(lines, 3, ed);
+    const std::string lines[] = {"cat", "dog", "cat"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
     CHECK(replaceAll(ed, "cat", "bird") == 2);
     CHECK(ed.getLine(0)->text == "bird");
     CHECK(ed.getLine(1)->text == "dog");
@@ -388,8 +457,9 @@ void test_replace_all_multi_line()
 // newStr containing pattern must not loop forever ("a" -> "aa").
 void test_replace_all_new_contains_pattern()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "a", "aa") == 3);
     CHECK(ed.getLine(0)->text == "aaaaaa");
 }
@@ -397,8 +467,9 @@ void test_replace_all_new_contains_pattern()
 // Empty newStr deletes every match.
 void test_replace_all_delete()
 {
-    const std::string lines[] = { "banana" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"banana"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "an", "") == 2);
     CHECK(ed.getLine(0)->text == "ba");
 }
@@ -406,8 +477,9 @@ void test_replace_all_delete()
 // Records one REPLACE command per replacement and sets modified.
 void test_replace_all_records_and_modifies()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     ed.setModified(false);
     CHECK(replaceAll(ed, "a", "b") == 3);
     CHECK(ed.isModified() == true);
@@ -417,8 +489,9 @@ void test_replace_all_records_and_modifies()
 // Undo restores the original text after replaceAll (one undo per replacement).
 void test_replace_all_undo_each()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     UndoRedo ur;
     CHECK(replaceAll(ed, "a", "b") == 3);
     CHECK(ed.getLine(0)->text == "bbb");
@@ -433,8 +506,9 @@ void test_replace_all_undo_each()
 // Overlapping: replaceAll is non-overlapping ("aa" in "aaa" -> 1 replacement).
 void test_replace_all_non_overlapping()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "aa", "X") == 1);
     CHECK(ed.getLine(0)->text == "Xa");
 }
@@ -442,10 +516,64 @@ void test_replace_all_non_overlapping()
 // Pattern equal to newStr still returns the count of matches.
 void test_replace_all_same_text()
 {
-    const std::string lines[] = { "aaa" };
-    Editor ed; makeEditorWith(lines, 1, ed);
+    const std::string lines[] = {"aaa"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     CHECK(replaceAll(ed, "a", "a") == 3);
     CHECK(ed.getLine(0)->text == "aaa");
+}
+
+// replaceAll grows a line and drops spans overlapped by the whole-line edit.
+void test_replace_all_adjusts_formats()
+{
+    const std::string lines[] = {"abab"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    Line *l = ed.getLine(0);
+
+    FormatSpan s;
+    s.startCol = 0;
+    s.endCol = 4;
+    s.type = BOLD;
+    l->formats.pushBack(s);
+
+    CHECK(replaceAll(ed, "ab", "X") == 2);
+    CHECK(l->text == "XX");
+    CHECK(l->formats.size() == 0);
+}
+
+// ---------- format-span handling in replaceAll ----------
+
+// replaceAll drops every format span on a line it rewrites, because it
+// applies a whole-line edit range [0, source.length()) to the span adjuster.
+void test_replace_all_drops_all_spans_on_modified_line()
+{
+    const std::string lines[] = {"aXbXc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    Line *l = ed.getLine(0);
+
+    // Three spans: before, between, after the two matches.
+    FormatSpan s1;
+    s1.startCol = 0;
+    s1.endCol = 1;
+    s1.type = BOLD;
+    FormatSpan s2;
+    s2.startCol = 2;
+    s2.endCol = 3;
+    s2.type = ITALIC;
+    FormatSpan s3;
+    s3.startCol = 4;
+    s3.endCol = 5;
+    s3.type = BOLD_ITALIC;
+    l->formats.pushBack(s1);
+    l->formats.pushBack(s2);
+    l->formats.pushBack(s3);
+
+    // Replace "X" -> "YY": matches at 1 and 3, result "aYYbYYc".
+    CHECK(replaceAll(ed, "X", "YY") == 2);
+    CHECK(l->text == "aYYbYYc");
+    CHECK(l->formats.size() == 0);
 }
 
 int main()
@@ -474,8 +602,8 @@ int main()
     test_contains_absent();
     test_contains_on_later_line();
 
-    test_display_empty_does_not_crash();
-    test_display_nonempty_does_not_crash();
+    test_display_not_found();
+    test_display_found();
 
     test_replace_occ_empty_pattern();
     test_replace_occ_bad_n();
@@ -487,6 +615,7 @@ int main()
     test_replace_occ_with_empty_new();
     test_replace_occ_records_and_modifies();
     test_replace_occ_undo_restores();
+    test_replace_occ_adjusts_formats();
 
     test_replace_all_empty_pattern();
     test_replace_all_empty_document();
@@ -499,6 +628,8 @@ int main()
     test_replace_all_undo_each();
     test_replace_all_non_overlapping();
     test_replace_all_same_text();
+    test_replace_all_adjusts_formats();
+    test_replace_all_drops_all_spans_on_modified_line();
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;
