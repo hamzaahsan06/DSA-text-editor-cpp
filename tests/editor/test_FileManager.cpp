@@ -53,6 +53,45 @@ static std::string readRawFile(const std::string& path)
 
 // ---------- newDocument ----------
 
+// Puts `ed` into a "used" state: three lines, a filename, unsaved changes,
+// cursor away from the origin, one undo command, one redo command, one bookmark.
+static void makeDirty(Editor& ed)
+{
+    const std::string lines[] = { "a", "b", "c" };
+    makeEditorWith(lines, 3, ed);
+    ed.setFilename("old.txt");
+    ed.setModified(true);
+    ed.cursorLine = 2;
+    ed.cursorCol = 1;
+
+    Command cmd;
+    cmd.type = INSERT_TEXT;
+    ed.undoStack.push(cmd);
+    ed.redoStack.push(cmd);
+
+    Bookmark mark;
+    mark.name = "m";
+    mark.line = 1;
+    ed.bookmarks.pushBack(mark);
+}
+
+// True if `ed` is in exactly the state Editor::reset() produces
+// (one empty line, empty stacks, no bookmarks, cursor 0/0, untitled, unmodified).
+static bool isResetState(Editor& ed)
+{
+    return ed.getLineCount() == 1
+        && ed.getLine(0) != nullptr
+        && ed.getLine(0)->text == ""
+        && ed.getLine(0)->formats.size() == 0
+        && ed.undoStack.isEmpty()
+        && ed.redoStack.isEmpty()
+        && ed.bookmarks.size() == 0
+        && ed.cursorLine == 0
+        && ed.cursorCol == 0
+        && ed.getFilename() == ""
+        && ed.isModified() == false;
+}
+
 void test_new_document_clears()
 {
     const std::string lines[] = { "a", "b" };
@@ -60,9 +99,22 @@ void test_new_document_clears()
     ed.setFilename("some.txt");
     ed.setModified(true);
     CHECK(newDocument(ed) == true);
-    CHECK(ed.isEmpty() == true);
+    CHECK(ed.getLineCount() == 1);          // one empty line, not zero lines
+    CHECK(ed.getLine(0)->text == "");
     CHECK(ed.getFilename() == "");
     CHECK(ed.isModified() == false);
+}
+
+// newDocument must leave the editor exactly as Editor::reset() does.
+void test_new_document_equals_reset_state()
+{
+    Editor ed; makeDirty(ed);
+    CHECK(isResetState(ed) == false);       // sanity: it really is dirty
+    CHECK(newDocument(ed) == true);
+    CHECK(isResetState(ed) == true);
+
+    Editor fresh;                           // a brand-new editor is the reference
+    CHECK(isResetState(fresh) == true);
 }
 
 // ---------- openFile ----------
@@ -109,10 +161,99 @@ void test_open_empty_file()
 
     Editor ed;
     CHECK(openFile(ed, path) == true);
-    CHECK(ed.getLineCount() == 0);
+    CHECK(ed.getLineCount() == 1);          // an empty file gives one empty line
+    CHECK(ed.getLine(0)->text == "");
+    CHECK(ed.getFilename() == path);
     CHECK(ed.isModified() == false);
 
     std::remove(path.c_str());
+}
+
+// Opening an empty file over a used editor must look like a new document,
+// except that it keeps the file name.
+void test_open_empty_file_matches_new_document()
+{
+    const std::string path = "test_open_empty_vs_new_tmp.txt";
+    writeRawFile(path, "");
+
+    Editor ed; makeDirty(ed);
+    CHECK(openFile(ed, path) == true);
+    CHECK(ed.getFilename() == path);
+    ed.setFilename("");                     // ignore the name; compare the rest
+    CHECK(isResetState(ed) == true);
+
+    std::remove(path.c_str());
+}
+
+// Undo and redo history belong to the old file, so opening must clear both.
+void test_open_clears_undo_history()
+{
+    const std::string path = "test_open_clears_history_tmp.txt";
+    writeRawFile(path, "new\ncontent");
+
+    Editor ed; makeDirty(ed);
+    CHECK(ed.undoStack.isEmpty() == false);
+    CHECK(ed.redoStack.isEmpty() == false);
+    CHECK(openFile(ed, path) == true);
+    CHECK(ed.undoStack.isEmpty() == true);
+    CHECK(ed.redoStack.isEmpty() == true);
+
+    std::remove(path.c_str());
+}
+
+// Bookmarks point into the old document, so opening must clear them.
+void test_open_clears_bookmarks()
+{
+    const std::string path = "test_open_clears_bookmarks_tmp.txt";
+    writeRawFile(path, "new\ncontent");
+
+    Editor ed; makeDirty(ed);
+    CHECK(ed.bookmarks.size() == 1);
+    CHECK(openFile(ed, path) == true);
+    CHECK(ed.bookmarks.size() == 0);
+
+    std::remove(path.c_str());
+}
+
+// The cursor must go back to the start of the newly opened document.
+void test_open_resets_cursor_and_state()
+{
+    const std::string path = "test_open_resets_cursor_tmp.txt";
+    writeRawFile(path, "one\ntwo");
+
+    Editor ed; makeDirty(ed);
+    CHECK(openFile(ed, path) == true);
+    CHECK(ed.cursorLine == 0);
+    CHECK(ed.cursorCol == 0);
+    CHECK(ed.getFilename() == path);
+    CHECK(ed.isModified() == false);
+    CHECK(ed.getLineCount() == 2);
+    CHECK(ed.getLine(0)->text == "one");
+    CHECK(ed.getLine(1)->text == "two");
+
+    std::remove(path.c_str());
+}
+
+// If opening fails, NOTHING about the current editor may change:
+// document, history, bookmarks, cursor, filename and modified flag.
+void test_failed_open_keeps_everything()
+{
+    Editor ed; makeDirty(ed);
+
+    CHECK(openFile(ed, "definitely_missing_file_xyz.txt") == false);
+    CHECK(openFile(ed, "") == false);
+
+    CHECK(ed.getLineCount() == 3);
+    CHECK(ed.getLine(0)->text == "a");
+    CHECK(ed.getLine(1)->text == "b");
+    CHECK(ed.getLine(2)->text == "c");
+    CHECK(ed.undoStack.size() == 1);
+    CHECK(ed.redoStack.size() == 1);
+    CHECK(ed.bookmarks.size() == 1);
+    CHECK(ed.cursorLine == 2);
+    CHECK(ed.cursorCol == 1);
+    CHECK(ed.getFilename() == "old.txt");
+    CHECK(ed.isModified() == true);
 }
 
 void test_open_strips_cr()
@@ -222,6 +363,41 @@ void test_save_then_open_round_trip()
     std::remove(path.c_str());
 }
 
+// A new document (one empty line) saves as an empty file and opens back
+// as the same single empty line.
+void test_save_then_open_new_document()
+{
+    const std::string path = "test_new_doc_round_trip_tmp.txt";
+    Editor ed;
+    CHECK(newDocument(ed) == true);
+    CHECK(saveFileAs(ed, path) == true);
+    CHECK(readRawFile(path) == "");
+
+    Editor ed2; makeDirty(ed2);
+    CHECK(openFile(ed2, path) == true);
+    CHECK(ed2.getLineCount() == 1);
+    CHECK(ed2.getLine(0)->text == "");
+
+    std::remove(path.c_str());
+}
+
+// saveAs may change the filename and the modified flag only when it succeeds.
+void test_save_as_changes_state_only_on_success()
+{
+    const std::string path = "test_save_as_state_tmp.txt";
+    Editor ed; makeDirty(ed);               // filename "old.txt", modified
+
+    CHECK(saveFileAs(ed, "/nonexistent_dir_xyz/out.txt") == false);
+    CHECK(ed.getFilename() == "old.txt");
+    CHECK(ed.isModified() == true);
+
+    CHECK(saveFileAs(ed, path) == true);
+    CHECK(ed.getFilename() == path);
+    CHECK(ed.isModified() == false);
+
+    std::remove(path.c_str());
+}
+
 void test_save_then_open_empty_middle_line()
 {
     const std::string path = "test_empty_middle_tmp.txt";
@@ -258,13 +434,19 @@ void test_exit_modified()
 int main()
 {
     test_new_document_clears();
+    test_new_document_equals_reset_state();
 
     test_open_empty_path();
     test_open_missing_file();
     test_open_reads_lines();
     test_open_empty_file();
+    test_open_empty_file_matches_new_document();
     test_open_strips_cr();
     test_open_no_trailing_newline();
+    test_open_clears_undo_history();
+    test_open_clears_bookmarks();
+    test_open_resets_cursor_and_state();
+    test_failed_open_keeps_everything();
 
     test_save_without_filename();
     test_save_to_existing_filename();
@@ -275,6 +457,8 @@ int main()
 
     test_save_then_open_round_trip();
     test_save_then_open_empty_middle_line();
+    test_save_then_open_new_document();
+    test_save_as_changes_state_only_on_success();
 
     test_exit_unmodified();
     test_exit_modified();
