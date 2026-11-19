@@ -5,7 +5,6 @@
 #include "editor/UndoRedo.h"
 #include "editor/Bookmarks.h"
 
-// True for space, tab, newline, carriage return, vertical tab and form feed.
 static bool isWhitespace(char c)
 {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
@@ -57,7 +56,6 @@ static void moveCursor(Editor &ed, int line, int col)
     ed.cursorCol = col;
 }
 
-// Shift spans to the right on insert.
 static void shiftSpansOnInsert(Line &line, int col, int length)
 {
     for (int i = 0; i < line.formats.size(); ++i)
@@ -67,15 +65,12 @@ static void shiftSpansOnInsert(Line &line, int col, int length)
             continue;
         if (span.startCol >= col)
             span.startCol += length;
-        // endCol is exclusive: text typed exactly at the end of a span is
-        // outside it, so the span only grows when the insert is strictly inside.
         if (span.endCol > col)
             span.endCol += length;
         line.formats.set(i, span);
     }
 }
 
-// Shift/shrink spans on delete.
 static void shiftSpansOnDelete(Line &line, int startCol, int endCol)
 {
     int length = endCol - startCol;
@@ -114,10 +109,6 @@ static void shiftSpansOnDelete(Line &line, int startCol, int endCol)
     }
 }
 
-// Splits the spans of `first` at column `col` when its text is cut in two.
-// Spans ending at or before col stay on `first`; spans starting at or after col
-// move to `second` with their columns reduced by col; a span that crosses col is
-// cut into two pieces, one on each line.
 static void splitSpansAtColumn(Line &first, Line &second, int col)
 {
     DynamicArray<FormatSpan> keep;
@@ -202,14 +193,14 @@ bool insertNewLine(Editor &ed, int line, int col)
     ed.document.insertAtPosition(line + 1, below);
     adjustBookmarksOnLineInsert(ed, line + 1);
 
-    // We record a single INSERT_LINE command.
-    // op.line = the original line.
-    // op.newText = the full original text (used to merge back on undo).
+    // Mark line-split commands with oldText = "\n" so even empty-line splits
+    // are distinguishable from recordInsertLine() during undo/redo.
     UndoRedo history;
     Command op;
     op.type = INSERT_LINE;
     op.line = line;
     op.col = col;
+    op.oldText = "\n";
     op.newText = originalText;
     history.record(ed, op);
 
@@ -301,7 +292,6 @@ bool deleteLines(Editor &ed, int startLine, int endLine)
         return false;
     }
 
-    // Gather the text BEFORE removing the lines.
     std::string removedText;
     for (int i = startLine; i <= endLine; ++i)
     {
@@ -315,7 +305,6 @@ bool deleteLines(Editor &ed, int startLine, int endLine)
     }
 
     UndoRedo history;
-    // recordDeleteLine checks that line < getLineCount()
     if (!history.recordDeleteLine(ed, startLine, removedText))
         return false;
 

@@ -15,6 +15,8 @@ public:
     void clearFormats();
     int count() const;
     std::string applyFormatting(const std::string& lineText) const;
+    static std::string applySpans(const std::string& lineText,
+                                  const DynamicArray<FormatSpan>& spans);
 };
 
 #endif

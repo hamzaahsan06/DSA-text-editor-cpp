@@ -3,16 +3,8 @@
 #include "editor/Editor.h"
 #include "editor/Types.h"
 
-// Design decision: bookmarks move with the text.
-// Inserting a line above a bookmark shifts its line number up by one;
-// deleting a line above it shifts it down. If the bookmarked line itself
-// is deleted, the bookmark is removed. Bookmarks are not undoable and
-// do not mark the editor as modified.
-
-// Reserved name for savePreviousPosition / returnToPreviousPosition.
 static const char *PREVIOUS_SLOT_NAME = "__previous";
 
-// Returns true if name is non-empty and contains no whitespace.
 static bool isValidName(const std::string &name)
 {
     if (name.empty())
@@ -30,7 +22,6 @@ static bool isValidName(const std::string &name)
     return true;
 }
 
-// Returns true if name uses the reserved "__" prefix.
 static bool isReservedName(const std::string &name)
 {
     if (name.length() < 2)
@@ -40,7 +31,6 @@ static bool isReservedName(const std::string &name)
     return name[0] == '_' && name[1] == '_';
 }
 
-// Returns the text length of the given line, or -1 if the index is invalid.
 static int lineLengthAt(Editor &ed, int lineIndex)
 {
     if (lineIndex < 0 || lineIndex >= ed.getLineCount())
@@ -55,7 +45,6 @@ static int lineLengthAt(Editor &ed, int lineIndex)
     return (int)line->text.length();
 }
 
-// Moves the cursor to (line, col), clamping col to the line length.
 static bool moveCursorTo(Editor &ed, int line, int col)
 {
     int length = lineLengthAt(ed, line);
@@ -76,7 +65,6 @@ static bool moveCursorTo(Editor &ed, int line, int col)
     return true;
 }
 
-// Linear search by name; returns index in ed.bookmarks or -1.
 int findBookmark(Editor &ed, const std::string &name)
 {
     int total = ed.bookmarks.size();
@@ -95,7 +83,6 @@ int findBookmark(Editor &ed, const std::string &name)
     return -1;
 }
 
-// Validates the name, position, and duplicate; then appends the bookmark.
 bool addBookmark(Editor &ed, const std::string &name, int line, int col)
 {
     if (!isValidName(name))
@@ -127,13 +114,11 @@ bool addBookmark(Editor &ed, const std::string &name, int line, int col)
     return ed.bookmarks.pushBack(fresh);
 }
 
-// Adds a bookmark at the current cursor position.
 bool addBookmarkAtCursor(Editor &ed, const std::string &name)
 {
     return addBookmark(ed, name, ed.cursorLine, ed.cursorCol);
 }
 
-// Removes the bookmark with the given name.
 bool removeBookmark(Editor &ed, const std::string &name)
 {
     int index = findBookmark(ed, name);
@@ -145,7 +130,6 @@ bool removeBookmark(Editor &ed, const std::string &name)
     return ed.bookmarks.removeAt(index, removed);
 }
 
-// Jumps the cursor to the named bookmark, clamping col if needed.
 bool gotoBookmark(Editor &ed, const std::string &name)
 {
     int index = findBookmark(ed, name);
@@ -161,22 +145,35 @@ bool gotoBookmark(Editor &ed, const std::string &name)
     return moveCursorTo(ed, target.line, target.col);
 }
 
-// Jumps to the bookmark at the given 0-based index.
+// Jumps to the visible (non-reserved) bookmark at the given 0-based index.
 bool gotoBookmarkByIndex(Editor &ed, int index)
 {
-    if (index < 0 || index >= ed.bookmarks.size())
+    if (index < 0)
     {
         return false;
     }
-    Bookmark target;
-    if (!ed.bookmarks.get(index, target))
+    int visibleIndex = 0;
+    int total = ed.bookmarks.size();
+    for (int i = 0; i < total; ++i)
     {
-        return false;
+        Bookmark target;
+        if (!ed.bookmarks.get(i, target))
+        {
+            continue;
+        }
+        if (isReservedName(target.name))
+        {
+            continue;
+        }
+        if (visibleIndex == index)
+        {
+            return moveCursorTo(ed, target.line, target.col);
+        }
+        ++visibleIndex;
     }
-    return moveCursorTo(ed, target.line, target.col);
+    return false;
 }
 
-// Stores the current cursor under the reserved previous-position slot.
 bool savePreviousPosition(Editor &ed)
 {
     int length = lineLengthAt(ed, ed.cursorLine);
@@ -209,19 +206,27 @@ bool savePreviousPosition(Editor &ed)
     return ed.bookmarks.pushBack(fresh);
 }
 
-// Jumps to the reserved previous-position slot.
 bool returnToPreviousPosition(Editor &ed)
 {
     return gotoBookmark(ed, PREVIOUS_SLOT_NAME);
 }
 
-// Returns the number of bookmarks.
+// Returns the number of visible (non-reserved) bookmarks.
 int getBookmarkCount(Editor &ed)
 {
-    return ed.bookmarks.size();
+    int visible = 0;
+    int total = ed.bookmarks.size();
+    for (int i = 0; i < total; ++i)
+    {
+        Bookmark current;
+        if (ed.bookmarks.get(i, current) && !isReservedName(current.name))
+        {
+            ++visible;
+        }
+    }
+    return visible;
 }
 
-// Prints all visible bookmarks with 1-based numbering, or a "none" message.
 void listBookmarks(Editor &ed, std::ostream &out)
 {
     int total = ed.bookmarks.size();
@@ -266,13 +271,11 @@ void listBookmarks(Editor &ed, std::ostream &out)
     }
 }
 
-// Removes all bookmarks, keeping the underlying buffer for reuse.
 void clearBookmarks(Editor &ed)
 {
     ed.bookmarks.clear();
 }
 
-// Shifts bookmark lines up by one when a line is inserted at or above them.
 void adjustBookmarksOnLineInsert(Editor &ed, int insertedLine)
 {
     if (insertedLine < 0)
@@ -295,8 +298,6 @@ void adjustBookmarksOnLineInsert(Editor &ed, int insertedLine)
     }
 }
 
-// Drops bookmarks on the deleted line and shifts those below it up by one.
-// Loop runs backwards so removals do not skip elements.
 void adjustBookmarksOnLineDelete(Editor &ed, int deletedLine)
 {
     if (deletedLine < 0)

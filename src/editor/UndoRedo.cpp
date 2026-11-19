@@ -1,4 +1,5 @@
 #include "editor/UndoRedo.h"
+#include "editor/Bookmarks.h"
 
 static bool buildInsertedText(const std::string &current, int col,
                               const std::string &insertText, std::string &out)
@@ -41,6 +42,101 @@ static void splitBlobIntoLines(const std::string &blob, DynamicArray<std::string
         }
     }
     lines.pushBack(blob.substr(start));
+}
+
+static void splitLineSpans(Line &first, Line &second, int col)
+{
+    DynamicArray<FormatSpan> keep;
+    DynamicArray<FormatSpan> moved;
+
+    for (int i = 0; i < first.formats.size(); ++i)
+    {
+        FormatSpan span;
+        if (!first.formats.get(i, span))
+            continue;
+
+        if (span.endCol <= col)
+        {
+            keep.pushBack(span);
+        }
+        else if (span.startCol >= col)
+        {
+            span.startCol -= col;
+            span.endCol -= col;
+            moved.pushBack(span);
+        }
+        else
+        {
+            FormatSpan head = span;
+            head.endCol = col;
+            keep.pushBack(head);
+
+            FormatSpan tail = span;
+            tail.startCol = 0;
+            tail.endCol = span.endCol - col;
+            moved.pushBack(tail);
+        }
+    }
+
+    first.formats = keep;
+    second.formats = moved;
+}
+
+static void mergeLineSpans(Line &first, const Line &second, int splitCol)
+{
+    for (int i = 0; i < second.formats.size(); ++i)
+    {
+        FormatSpan tail;
+        if (!second.formats.get(i, tail))
+            continue;
+
+        tail.startCol += splitCol;
+        tail.endCol += splitCol;
+
+        bool merged = false;
+        if (tail.startCol == splitCol && first.formats.size() > 0)
+        {
+            int lastIdx = first.formats.size() - 1;
+            FormatSpan head;
+            if (first.formats.get(lastIdx, head) &&
+                head.endCol == splitCol && head.type == tail.type)
+            {
+                head.endCol = tail.endCol;
+                first.formats.set(lastIdx, head);
+                merged = true;
+            }
+        }
+
+        if (!merged)
+        {
+            first.formats.pushBack(tail);
+        }
+    }
+}
+
+static void clampCursorToDocument(Editor &ed, int targetLine, int targetCol)
+{
+    int count = ed.getLineCount();
+    if (count <= 0)
+    {
+        ed.cursorLine = 0;
+        ed.cursorCol = 0;
+        return;
+    }
+    if (targetLine < 0)
+        targetLine = 0;
+    if (targetLine >= count)
+        targetLine = count - 1;
+
+    Line *line = ed.getLine(targetLine);
+    int maxCol = (line != nullptr) ? (int)line->text.length() : 0;
+    if (targetCol < 0)
+        targetCol = 0;
+    if (targetCol > maxCol)
+        targetCol = maxCol;
+
+    ed.cursorLine = targetLine;
+    ed.cursorCol = targetCol;
 }
 
 bool UndoRedo::record(Editor &ed, const Command &op)
@@ -130,15 +226,18 @@ static bool applyUndo(Editor &ed, const Command &op)
         if (line == nullptr)
             return false;
         std::string updated;
+        int cursorAfter = op.col;
         if (op.type == INSERT_TEXT)
         {
             if (!buildErasedText(line->text, op.col, (int)op.newText.length(), updated))
                 return false;
+            cursorAfter = op.col;
         }
         else if (op.type == DELETE_TEXT)
         {
             if (!buildInsertedText(line->text, op.col, op.oldText, updated))
                 return false;
+            cursorAfter = op.col + (int)op.oldText.length();
         }
         else
         {
@@ -147,33 +246,41 @@ static bool applyUndo(Editor &ed, const Command &op)
                 return false;
             if (!buildInsertedText(middle, op.col, op.oldText, updated))
                 return false;
+            cursorAfter = op.col + (int)op.oldText.length();
         }
         line->text = updated;
+        clampCursorToDocument(ed, op.line, cursorAfter);
         return true;
     }
 
     if (op.type == INSERT_LINE)
     {
-        // If newText is not empty, this was a line split (TextOps::insertNewLine).
-        // We must merge the two lines back together.
-        if (!op.newText.empty())
+        bool isLineSplit = !op.newText.empty() || op.oldText == "\n";
+        if (isLineSplit)
         {
             if (line == nullptr)
                 return false;
             Line *nextLine = ed.getLine(op.line + 1);
             if (nextLine != nullptr)
             {
-                line->text = op.newText; // Restore the merged text
+                mergeLineSpans(*line, *nextLine, op.col);
+                line->text = op.newText;
                 Line dummy;
                 ed.document.removeAtPosition(op.line + 1, dummy);
+                adjustBookmarksOnLineDelete(ed, op.line + 1);
             }
+            clampCursorToDocument(ed, op.line, op.col);
             return true;
         }
-        // Normal empty line insert undo
+
         if (line == nullptr)
             return false;
         Line removed;
-        return ed.document.removeAtPosition(op.line, removed);
+        if (!ed.document.removeAtPosition(op.line, removed))
+            return false;
+        adjustBookmarksOnLineDelete(ed, op.line);
+        clampCursorToDocument(ed, op.line, 0);
+        return true;
     }
 
     if (op.type == DELETE_LINE)
@@ -186,7 +293,9 @@ static bool applyUndo(Editor &ed, const Command &op)
             pieces.get(i, restored.text);
             if (!ed.document.insertAtPosition(op.line + i, restored))
                 return false;
+            adjustBookmarksOnLineInsert(ed, op.line + i);
         }
+        clampCursorToDocument(ed, op.line, 0);
         return true;
     }
 
@@ -202,15 +311,18 @@ static bool applyRedo(Editor &ed, const Command &op)
         if (line == nullptr)
             return false;
         std::string updated;
+        int cursorAfter = op.col;
         if (op.type == INSERT_TEXT)
         {
             if (!buildInsertedText(line->text, op.col, op.newText, updated))
                 return false;
+            cursorAfter = op.col + (int)op.newText.length();
         }
         else if (op.type == DELETE_TEXT)
         {
             if (!buildErasedText(line->text, op.col, (int)op.oldText.length(), updated))
                 return false;
+            cursorAfter = op.col;
         }
         else
         {
@@ -219,27 +331,38 @@ static bool applyRedo(Editor &ed, const Command &op)
                 return false;
             if (!buildInsertedText(middle, op.col, op.newText, updated))
                 return false;
+            cursorAfter = op.col + (int)op.newText.length();
         }
         line->text = updated;
+        clampCursorToDocument(ed, op.line, cursorAfter);
         return true;
     }
 
     if (op.type == INSERT_LINE)
     {
-        // If newText is not empty, it was a split. Re-split it.
-        if (!op.newText.empty())
+        bool isLineSplit = !op.newText.empty() || op.oldText == "\n";
+        if (isLineSplit)
         {
             if (line == nullptr)
                 return false;
             Line below;
             below.text = line->text.substr(op.col);
             line->text.erase(op.col);
-            ed.document.insertAtPosition(op.line + 1, below);
+            splitLineSpans(*line, below, op.col);
+            if (!ed.document.insertAtPosition(op.line + 1, below))
+                return false;
+            adjustBookmarksOnLineInsert(ed, op.line + 1);
+            clampCursorToDocument(ed, op.line + 1, 0);
             return true;
         }
+
         Line fresh;
         fresh.text = op.newText;
-        return ed.document.insertAtPosition(op.line, fresh);
+        if (!ed.document.insertAtPosition(op.line, fresh))
+            return false;
+        adjustBookmarksOnLineInsert(ed, op.line);
+        clampCursorToDocument(ed, op.line, 0);
+        return true;
     }
 
     if (op.type == DELETE_LINE)
@@ -252,7 +375,9 @@ static bool applyRedo(Editor &ed, const Command &op)
             Line removed;
             if (!ed.document.removeAtPosition(op.line, removed))
                 return false;
+            adjustBookmarksOnLineDelete(ed, op.line);
         }
+        clampCursorToDocument(ed, op.line, 0);
         return true;
     }
 

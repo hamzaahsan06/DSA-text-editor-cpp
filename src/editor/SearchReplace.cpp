@@ -5,8 +5,6 @@
 #include "editor/Types.h"
 #include "editor/UndoRedo.h"
 
-// Returns true if text contains pattern starting exactly at position pos.
-// Assumes pos is inside the string and pos + pattern.length() <= text.length().
 static bool matchesAt(const std::string &text, const std::string &pattern, int pos)
 {
     int m = (int)pattern.length();
@@ -20,8 +18,6 @@ static bool matchesAt(const std::string &text, const std::string &pattern, int p
     return true;
 }
 
-// Returns true if a format span overlaps the column range [start, end).
-// Overlap means the span is not entirely before start or entirely after end.
 static bool spanOverlaps(const FormatSpan &span, int start, int end)
 {
     if (span.endCol <= start)
@@ -35,10 +31,6 @@ static bool spanOverlaps(const FormatSpan &span, int start, int end)
     return true;
 }
 
-// Rebuilds a line's format spans after replacing oldLen characters at
-// replaceCol with newLen characters. Spans entirely before the edit are
-// kept; spans entirely after it are shifted; spans overlapping the edit
-// are dropped, since their meaning is ambiguous.
 static void adjustFormatsAfterReplace(Line &line, int replaceCol,
                                       int oldLen, int newLen)
 {
@@ -68,8 +60,6 @@ static void adjustFormatsAfterReplace(Line &line, int replaceCol,
     line.formats = updated;
 }
 
-// Returns the index of the first match of pattern in text at or after
-// startPos, or -1 if there is no match.
 int findSubstring(const std::string &text, const std::string &pattern, int startPos)
 {
     if (pattern.length() == 0)
@@ -101,7 +91,6 @@ int findSubstring(const std::string &text, const std::string &pattern, int start
     return -1;
 }
 
-// Collects every match (including overlapping ones) across all lines.
 DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
 {
     DynamicArray<Position> results;
@@ -131,13 +120,12 @@ DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
             p.line = li;
             p.col = idx;
             results.pushBack(p);
-            start = idx + 1; // allow overlapping matches
+            start = idx + 1;
         }
     }
     return results;
 }
 
-// Returns true if the pattern occurs at least once anywhere in the document.
 bool containsText(Editor &ed, const std::string &pattern)
 {
     if (pattern.length() == 0)
@@ -160,8 +148,6 @@ bool containsText(Editor &ed, const std::string &pattern)
     return false;
 }
 
-// Prints search results: a "Not found" message, or the count and each
-// 1-based position.
 void displaySearchResults(const DynamicArray<Position> &results, std::ostream &out)
 {
     int count = results.size();
@@ -178,8 +164,6 @@ void displaySearchResults(const DynamicArray<Position> &results, std::ostream &o
     }
 }
 
-// Builds the text that results from replacing the range
-// [replaceCol, replaceCol + oldLen) of source with newText.
 static std::string buildReplacedText(const std::string &source, int replaceCol,
                                      int oldLen, const std::string &newText)
 {
@@ -189,8 +173,6 @@ static std::string buildReplacedText(const std::string &source, int replaceCol,
     return result;
 }
 
-// Replaces the nth match (1-based) of pattern with newStr. Records the
-// change through UndoRedo and adjusts the line's format spans.
 bool replaceOccurrence(Editor &ed, const std::string &pattern,
                        const std::string &newStr, int n)
 {
@@ -242,15 +224,12 @@ bool replaceOccurrence(Editor &ed, const std::string &pattern,
                 ed.setModified(true);
                 return true;
             }
-            start = idx + 1; // overlapping matches, matching searchAll
+            start = idx + 1;
         }
     }
     return false;
 }
 
-// Replaces every non-overlapping match left to right. Returns the number
-// of replacements. The scan advances past the inserted text so newStr
-// containing pattern cannot cause an infinite loop.
 int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr)
 {
     if (pattern.length() == 0)
@@ -265,6 +244,9 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
 
     UndoRedo undoRedo;
     int total = 0;
+    int patLen = (int)pattern.length();
+    int newLen = (int)newStr.length();
+    int delta = newLen - patLen;
 
     for (int li = 0; li < lines; ++li)
     {
@@ -276,7 +258,9 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
 
         std::string source = line->text;
         std::string rebuilt;
+        DynamicArray<int> liveCols;
         int start = 0;
+        int shift = 0;
         int replacedOnThisLine = 0;
         bool recordFailed = false;
 
@@ -291,29 +275,40 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
 
             rebuilt += source.substr(start, idx - start);
 
-            if (!undoRedo.recordReplace(ed, li, idx, pattern, newStr))
+            int liveCol = idx + shift;
+            if (!undoRedo.recordReplace(ed, li, liveCol, pattern, newStr))
             {
                 recordFailed = true;
                 break;
             }
 
+            liveCols.pushBack(liveCol);
             rebuilt += newStr;
             ++total;
             ++replacedOnThisLine;
-            start = idx + (int)pattern.length();
+            shift += delta;
+            start = idx + patLen;
         }
 
         if (recordFailed)
         {
-            // Document is unchanged for this line; stop to keep undo
-            // history consistent with the text.
+            // Roll back partial undo entries recorded for this unmodified line.
+            for (int r = 0; r < replacedOnThisLine; ++r)
+            {
+                Command discarded;
+                ed.undoStack.pop(discarded);
+            }
             break;
         }
 
         if (replacedOnThisLine > 0)
         {
-            adjustFormatsAfterReplace(*line, 0, (int)source.length(),
-                                      (int)rebuilt.length());
+            for (int r = 0; r < liveCols.size(); ++r)
+            {
+                int col = 0;
+                liveCols.get(r, col);
+                adjustFormatsAfterReplace(*line, col, patLen, newLen);
+            }
             line->text = rebuilt;
         }
     }

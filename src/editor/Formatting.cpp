@@ -1,7 +1,8 @@
 #include "editor/Formatting.h"
 
 bool Formatting::addFormat(int startCol, int endCol, bool isBold, bool isItalic) {
-    if (startCol < 0 || endCol < startCol) return false;
+    // Half-open [startCol, endCol): empty or negative ranges are invalid.
+    if (startCol < 0 || endCol <= startCol) return false;
     if (!isBold && !isItalic) return false;
 
     FormatSpan span;
@@ -32,7 +33,12 @@ int Formatting::count() const {
     return spans.size();
 }
 
-std::string Formatting::applyFormatting(const std::string& lineText) const {
+std::string Formatting::applySpans(const std::string& lineText,
+                                   const DynamicArray<FormatSpan>& spans) {
+    if (spans.isEmpty() || lineText.empty()) {
+        return lineText;
+    }
+
     std::string result = "";
     int len = static_cast<int>(lineText.length());
 
@@ -44,7 +50,7 @@ std::string Formatting::applyFormatting(const std::string& lineText) const {
             FormatSpan s;
             spans.get(j, s);
 
-            if (i >= s.startCol && i <= s.endCol) {
+            if (i >= s.startCol && i < s.endCol) {
                 if (s.type == BOLD || s.type == BOLD_ITALIC) bold = true;
                 if (s.type == ITALIC || s.type == BOLD_ITALIC) italic = true;
             }
@@ -57,4 +63,8 @@ std::string Formatting::applyFormatting(const std::string& lineText) const {
     }
 
     return result;
+}
+
+std::string Formatting::applyFormatting(const std::string& lineText) const {
+    return applySpans(lineText, spans);
 }

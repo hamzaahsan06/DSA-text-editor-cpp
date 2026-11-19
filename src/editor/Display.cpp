@@ -1,4 +1,5 @@
 #include "editor/Display.h"
+#include "editor/Formatting.h"
 
 typedef DoublyLinkedList<Line>::Node Node;
 
@@ -21,7 +22,6 @@ static void printLabel(std::ostream& out, int number, int width) {
 }
 
 // Node at index, walking from the nearer end. Returns nullptr if out of range.
-// Used instead of DoublyLinkedList::get() so the Line (and its formats) is not copied.
 static Node* nodeAtIndex(const DoublyLinkedList<Line>& doc, int index) {
     int n = doc.size();
     if (index < 0 || index >= n) return nullptr;
@@ -48,7 +48,7 @@ DocStats getStats(const Editor& ed) {
         const std::string& text = cur->data.text;
         s.chars += static_cast<int>(text.size());
 
-        bool inWord = false;                 // words never span two lines
+        bool inWord = false;
         for (std::size_t i = 0; i < text.size(); ++i) {
             if (isWhitespace(text[i])) {
                 inWord = false;
@@ -69,10 +69,9 @@ void displayDocument(const Editor& ed, std::ostream& out) {
 
     int width = digitCount(ed.document.size());
     int number = 1;
-    // Follow node pointers: O(n). Calling get(i) in a loop would be O(n^2).
     for (Node* cur = ed.document.getHead(); cur != nullptr; cur = cur->next, ++number) {
         printLabel(out, number, width);
-        out << cur->data.text << '\n';
+        out << Formatting::applySpans(cur->data.text, cur->data.formats) << '\n';
     }
 }
 
@@ -90,7 +89,7 @@ bool displayLine(const Editor& ed, int index, std::ostream& out) {
     }
 
     printLabel(out, index + 1, digitCount(ed.document.size()));
-    out << node->data.text << '\n';
+    out << Formatting::applySpans(node->data.text, node->data.formats) << '\n';
     return true;
 }
 
