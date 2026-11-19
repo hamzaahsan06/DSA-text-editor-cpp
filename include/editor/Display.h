@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include "ds/DoublyLinkedList.h"
+#include "editor/Editor.h"
 
 // Counts for the whole document. Newlines are not counted as characters.
 struct DocStats {
@@ -21,11 +22,15 @@ DocStats getStats(const DoublyLinkedList<std::string>& doc);
 void displayDocument(const DoublyLinkedList<std::string>& doc,
                      std::ostream& out = std::cout);
 
+// Editor overloads render each line's format spans as ANSI styles.
+void displayDocument(const Editor& editor, std::ostream& out = std::cout);
+
 // Print one line. index is 0-based (same as the list); the label shown is
 // 1-based. Returns false and prints an error if the index is invalid
 // or the document is empty.
 bool displayLine(const DoublyLinkedList<std::string>& doc, int index,
                  std::ostream& out = std::cout);
+bool displayLine(const Editor& editor, int index, std::ostream& out = std::cout);
 
 // Print file name, line / word / character counts and the unsaved flag.
 void displayStats(const DoublyLinkedList<std::string>& doc,

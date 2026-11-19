@@ -18,6 +18,8 @@ bool containsText(Editor& ed, const std::string& pattern);
 
 // Prints search results: "Not found" or "Found N occurrence(s):" then positions (1-based).
 void displaySearchResults(const DynamicArray<Position>& results, std::ostream& out);
+void displaySearchResults(const DynamicArray<Position>& results,
+                          const std::string& pattern, std::ostream& out);
 
 // Replaces the nth match (n starts at 1). Returns false on bad input or too few matches.
 bool replaceOccurrence(Editor& ed, const std::string& pattern, const std::string& newStr, int n);

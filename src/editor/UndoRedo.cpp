@@ -42,42 +42,57 @@ bool UndoRedo::recordReplace(Editor& ed, int line, int col,
     return record(ed, op);
 }
 
+bool UndoRedo::recordReplaceLine(Editor& ed, int line,
+                                 const std::string& oldText, const std::string& newText) {
+    Command op;
+    op.type = REPLACE;
+    op.line = line;
+    op.col = 0;
+    op.oldText = oldText;
+    op.newText = newText;
+    op.wholeLine = true;
+    return record(ed, op);
+}
+
 // Reverts the most recent command. O(m).
 bool UndoRedo::undo(Editor& ed) {
     if (ed.undoStack.isEmpty() || ed.redoStack.isFull()) return false;
 
     Command op;
     if (!ed.undoStack.peek(op)) return false;
-
     Line* line = ed.getLine(op.line);
     if (line == nullptr) return false;
+    std::string& text = line->text;
+    if (op.col < 0) return false;
 
-    ed.undoStack.pop(op);
-
-    std::string& document = line->text;
-
-    if (op.type == INSERT_TEXT) {
-        // Guard against out-of-range erase.
-        if (op.col < 0 || op.col + (int)op.newText.length() > (int)document.length()) {
-            ed.undoStack.push(op); // restore state
-            return false;
-        }
-        document.erase(op.col, op.newText.length());
+    if (op.wholeLine) {
+        if (op.type != REPLACE || text != op.newText) return false;
+        text = op.oldText;
+    } else if (op.type == INSERT_TEXT) {
+        if (op.col > (int)text.size() || op.newText.size() > text.size() - op.col ||
+            text.compare(op.col, op.newText.size(), op.newText) != 0) return false;
+        text.erase(op.col, op.newText.size());
     } else if (op.type == DELETE_TEXT) {
-        if (op.col < 0 || op.col > (int)document.length()) {
-            ed.undoStack.push(op);
-            return false;
-        }
-        document.insert(op.col, op.oldText);
+        if (op.col > (int)text.size()) return false;
+        text.insert(op.col, op.oldText);
     } else if (op.type == REPLACE) {
-        if (op.col < 0 || op.col + (int)op.newText.length() > (int)document.length()) {
-            ed.undoStack.push(op);
-            return false;
-        }
-        document.replace(op.col, op.newText.length(), op.oldText);
+        if (op.col > (int)text.size() || op.newText.size() > text.size() - op.col ||
+            text.compare(op.col, op.newText.size(), op.newText) != 0) return false;
+        text.replace(op.col, op.newText.size(), op.oldText);
+    } else {
+        return false;
     }
 
-    ed.redoStack.push(op);
+    ed.undoStack.pop(op);
+    if (!ed.redoStack.push(op)) {
+        // The capacity was checked above; this is defensive and should be unreachable.
+        if (op.wholeLine) text = op.newText;
+        else if (op.type == INSERT_TEXT) text.insert(op.col, op.newText);
+        else if (op.type == DELETE_TEXT) text.erase(op.col, op.oldText.size());
+        else text.replace(op.col, op.oldText.size(), op.newText);
+        ed.undoStack.push(op);
+        return false;
+    }
     ed.setModified(true);
     return true;
 }
@@ -88,35 +103,38 @@ bool UndoRedo::redo(Editor& ed) {
 
     Command op;
     if (!ed.redoStack.peek(op)) return false;
-
     Line* line = ed.getLine(op.line);
     if (line == nullptr) return false;
+    std::string& text = line->text;
+    if (op.col < 0) return false;
 
-    ed.redoStack.pop(op);
-
-    std::string& document = line->text;
-
-    if (op.type == INSERT_TEXT) {
-        if (op.col < 0 || op.col > (int)document.length()) {
-            ed.redoStack.push(op);
-            return false;
-        }
-        document.insert(op.col, op.newText);
+    if (op.wholeLine) {
+        if (op.type != REPLACE || text != op.oldText) return false;
+        text = op.newText;
+    } else if (op.type == INSERT_TEXT) {
+        if (op.col > (int)text.size()) return false;
+        text.insert(op.col, op.newText);
     } else if (op.type == DELETE_TEXT) {
-        if (op.col < 0 || op.col + (int)op.oldText.length() > (int)document.length()) {
-            ed.redoStack.push(op);
-            return false;
-        }
-        document.erase(op.col, op.oldText.length());
+        if (op.col > (int)text.size() || op.oldText.size() > text.size() - op.col ||
+            text.compare(op.col, op.oldText.size(), op.oldText) != 0) return false;
+        text.erase(op.col, op.oldText.size());
     } else if (op.type == REPLACE) {
-        if (op.col < 0 || op.col + (int)op.oldText.length() > (int)document.length()) {
-            ed.redoStack.push(op);
-            return false;
-        }
-        document.replace(op.col, op.oldText.length(), op.newText);
+        if (op.col > (int)text.size() || op.oldText.size() > text.size() - op.col ||
+            text.compare(op.col, op.oldText.size(), op.oldText) != 0) return false;
+        text.replace(op.col, op.oldText.size(), op.newText);
+    } else {
+        return false;
     }
 
-    ed.undoStack.push(op);
+    ed.redoStack.pop(op);
+    if (!ed.undoStack.push(op)) {
+        if (op.wholeLine) text = op.oldText;
+        else if (op.type == INSERT_TEXT) text.erase(op.col, op.newText.size());
+        else if (op.type == DELETE_TEXT) text.insert(op.col, op.oldText);
+        else text.replace(op.col, op.newText.size(), op.oldText);
+        ed.redoStack.push(op);
+        return false;
+    }
     ed.setModified(true);
     return true;
 }

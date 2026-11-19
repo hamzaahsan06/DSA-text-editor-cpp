@@ -1,4 +1,5 @@
 #include "editor/Display.h"
+#include "editor/Formatting.h"
 
 typedef DoublyLinkedList<std::string>::Node Node;
 
@@ -59,6 +60,21 @@ void displayDocument(const DoublyLinkedList<std::string>& doc, std::ostream& out
     }
 }
 
+void displayDocument(const Editor& editor, std::ostream& out) {
+    if (editor.getLineCount() == 0) {
+        out << "(document is empty)\n";
+        return;
+    }
+    Formatting formatting;
+    const int width = digitCount(editor.getLineCount());
+    for (int i = 0; i < editor.getLineCount(); ++i) {
+        Line* line = const_cast<Editor&>(editor).getLine(i);
+        if (!line) continue;
+        printLabel(out, i + 1, width);
+        out << formatting.applyFormatting(*line) << '\n';
+    }
+}
+
 bool displayLine(const DoublyLinkedList<std::string>& doc, int index, std::ostream& out) {
     if (doc.isEmpty()) {
         out << "Error: the document is empty.\n";
@@ -74,6 +90,23 @@ bool displayLine(const DoublyLinkedList<std::string>& doc, int index, std::ostre
 
     printLabel(out, index + 1, digitCount(doc.size()));
     out << text << '\n';
+    return true;
+}
+
+bool displayLine(const Editor& editor, int index, std::ostream& out) {
+    if (editor.getLineCount() == 0) {
+        out << "Error: the document is empty.\n";
+        return false;
+    }
+    Line* line = const_cast<Editor&>(editor).getLine(index);
+    if (!line) {
+        out << "Error: line " << (index + 1) << " does not exist (document has "
+            << editor.getLineCount() << " lines).\n";
+        return false;
+    }
+    printLabel(out, index + 1, digitCount(editor.getLineCount()));
+    Formatting formatting;
+    out << formatting.applyFormatting(*line) << '\n';
     return true;
 }
 

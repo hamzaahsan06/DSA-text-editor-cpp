@@ -75,6 +75,14 @@ public:
         return curr ? &(curr->data) : nullptr;
     }
 
+    const Line *getLine(int index) const
+    {
+        if (index < 0 || index >= document.size()) return nullptr;
+        const DoublyLinkedList<Line>::Node *curr = document.getHead();
+        for (int i = 0; i < index && curr != nullptr; ++i) curr = curr->next;
+        return curr ? &(curr->data) : nullptr;
+    }
+
     // Returns the current modified status of the editor.
     bool isModified() const
     {

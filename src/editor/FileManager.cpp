@@ -3,7 +3,8 @@
 #include <fstream>
 #include <iostream>
 
-// Write every line to path, one per line. Returns false on any I/O error.
+// Write every line with a terminating newline. A final newline lets a second
+// newline represent a trailing empty line when the file is read back.
 // Walks nodes via getHead()/next so the whole save is O(n).
 static bool writeToFile(Editor &ed, const std::string &path)
 {
@@ -15,8 +16,7 @@ static bool writeToFile(Editor &ed, const std::string &path)
     for (Node *cur = ed.document.getHead(); cur != nullptr; cur = cur->next)
     {
         out << cur->data.text;
-        if (cur->next != nullptr)
-            out << '\n';
+        out << '\n';
     }
     out.flush();
     return out.good();
@@ -24,9 +24,7 @@ static bool writeToFile(Editor &ed, const std::string &path)
 
 bool newDocument(Editor &ed)
 {
-    ed.document.clear();
-    ed.setFilename("");
-    ed.setModified(false);
+    ed.reset();
     return true;
 }
 
@@ -63,7 +61,20 @@ bool openFile(Editor &ed, const std::string &path)
         return false;
     }
 
+    // Keep the editor invariant that a document always has an editable line,
+    // including when opening an empty file.
+    if (temp.isEmpty())
+    {
+        Line emptyLine;
+        temp.insertAtTail(emptyLine);
+    }
+
     ed.document = temp;
+    ed.undoStack.clear();
+    ed.redoStack.clear();
+    ed.bookmarks.clear();
+    ed.cursorLine = 0;
+    ed.cursorCol = 0;
     ed.setFilename(path);
     ed.setModified(false);
     return true;

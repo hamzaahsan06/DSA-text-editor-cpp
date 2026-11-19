@@ -30,7 +30,7 @@ bool savePreviousPosition(Editor& ed);
 // Jumps to "__previous". Returns false if it does not exist.
 bool returnToPreviousPosition(Editor& ed);
 
-// Returns the number of bookmarks.
+// Returns the number of visible bookmarks (reserved internal positions excluded).
 int getBookmarkCount(Editor& ed);
 
 // Prints all non-hidden bookmarks, 1-based numbers.
@@ -44,3 +44,9 @@ void adjustBookmarksOnLineInsert(Editor& ed, int insertedLine);
 
 // Removes/shrinks bookmarks when a line is deleted at deletedLine.
 void adjustBookmarksOnLineDelete(Editor& ed, int deletedLine);
+
+// Keeps bookmarks attached to text when a line is edited or split/merged.
+void adjustBookmarksOnTextInsert(Editor& ed, int line, int col, int length);
+void adjustBookmarksOnTextDelete(Editor& ed, int line, int col, int length);
+void adjustBookmarksOnLineSplit(Editor& ed, int line, int splitCol);
+void adjustBookmarksOnLineMerge(Editor& ed, int firstLine, int firstLineLength);

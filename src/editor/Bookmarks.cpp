@@ -2,6 +2,7 @@
 #include "ds/DynamicArray.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
+#include "editor/Validation.h"
 
 // Design decision: Bookmarks MOVE WITH THE TEXT.
 // When a line is inserted above a bookmark, the bookmark's line number increases
@@ -12,7 +13,7 @@
 // Returns true if name has no leading/trailing whitespace and is non-empty.
 static bool isValidName(const std::string& name)
 {
-    if (name.empty()) return false;
+    if (isEmptyString(name)) return false;
     unsigned char first = (unsigned char)name[0];
     unsigned char last  = (unsigned char)name[name.length() - 1];
     if (first == ' ' || first == '\t' || first == '\n') return false;
@@ -44,10 +45,10 @@ bool addBookmark(Editor& ed, const std::string& name, int line, int col)
 {
     if (!isValidName(name)) return false;
     if (isReservedName(name)) return false;
-    if (line < 0 || line >= ed.getLineCount()) return false;
+    if (!isValidLine(ed, line)) return false;
     Line* l = ed.getLine(line);
     if (l == nullptr) return false;
-    if (col < 0 || col > (int)l->text.length()) return false;
+    if (!isValidColumn(ed, line, col)) return false;
     if (findBookmark(ed, name) != -1) return false;
 
     Bookmark b;
@@ -97,10 +98,20 @@ bool gotoBookmark(Editor& ed, const std::string& name)
 // Jumps to the bookmark at the given 0-based index. O(n) due to get.
 bool gotoBookmarkByIndex(Editor& ed, int index)
 {
-    if (index < 0 || index >= ed.bookmarks.size()) return false;
-
+    if (index < 0) return false;
+    int visibleIndex = 0;
     Bookmark b;
-    if (!ed.bookmarks.get(index, b)) return false;
+    bool found = false;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        if (!ed.bookmarks.get(i, b) || isReservedName(b.name)) continue;
+        if (visibleIndex++ == index)
+        {
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
     if (b.line < 0 || b.line >= ed.getLineCount()) return false;
 
     Line* l = ed.getLine(b.line);
@@ -119,10 +130,10 @@ bool gotoBookmarkByIndex(Editor& ed, int index)
 bool savePreviousPosition(Editor& ed)
 {
     // Validate current cursor position.
-    if (ed.cursorLine < 0 || ed.cursorLine >= ed.getLineCount()) return false;
+    if (!isValidLine(ed, ed.cursorLine)) return false;
     Line* l = ed.getLine(ed.cursorLine);
     if (l == nullptr) return false;
-    if (ed.cursorCol < 0 || ed.cursorCol > (int)l->text.length()) return false;
+    if (!isValidColumn(ed, ed.cursorLine, ed.cursorCol)) return false;
 
     int idx = findBookmark(ed, "__previous");
     if (idx >= 0)
@@ -150,7 +161,13 @@ bool returnToPreviousPosition(Editor& ed)
 // Returns the number of bookmarks. O(1).
 int getBookmarkCount(Editor& ed)
 {
-    return ed.bookmarks.size();
+    int visible = 0;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        Bookmark b;
+        if (ed.bookmarks.get(i, b) && !isReservedName(b.name)) ++visible;
+    }
+    return visible;
 }
 
 // Prints all non-hidden bookmarks with 1-based numbering. O(n).
@@ -227,6 +244,74 @@ void adjustBookmarksOnLineDelete(Editor& ed, int deletedLine)
         else if (b.line > deletedLine)
         {
             b.line -= 1;
+            ed.bookmarks.set(i, b);
+        }
+    }
+}
+
+// Insertion at a bookmark position moves it with the original text to the right.
+void adjustBookmarksOnTextInsert(Editor& ed, int line, int col, int length)
+{
+    if (line < 0 || col < 0 || length <= 0) return;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        Bookmark b;
+        if (ed.bookmarks.get(i, b) && b.line == line && b.col >= col)
+        {
+            b.col += length;
+            ed.bookmarks.set(i, b);
+        }
+    }
+}
+
+// Bookmarks inside deleted text collapse to the deletion start; later ones shift left.
+void adjustBookmarksOnTextDelete(Editor& ed, int line, int col, int length)
+{
+    if (line < 0 || col < 0 || length <= 0) return;
+    const int end = col + length;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        Bookmark b;
+        if (!ed.bookmarks.get(i, b) || b.line != line || b.col < col) continue;
+        if (b.col < end) b.col = col;
+        else b.col -= length;
+        ed.bookmarks.set(i, b);
+    }
+}
+
+// Positions at or after the split move to the new line, preserving text offset.
+void adjustBookmarksOnLineSplit(Editor& ed, int line, int splitCol)
+{
+    if (line < 0 || splitCol < 0) return;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        Bookmark b;
+        if (ed.bookmarks.get(i, b) && b.line == line && b.col >= splitCol)
+        {
+            ++b.line;
+            b.col -= splitCol;
+            ed.bookmarks.set(i, b);
+        }
+    }
+}
+
+// The second line is appended to the first; bookmarks on it shift by the old first-line length.
+void adjustBookmarksOnLineMerge(Editor& ed, int firstLine, int firstLineLength)
+{
+    if (firstLine < 0 || firstLineLength < 0) return;
+    for (int i = 0; i < ed.bookmarks.size(); ++i)
+    {
+        Bookmark b;
+        if (!ed.bookmarks.get(i, b)) continue;
+        if (b.line == firstLine + 1)
+        {
+            b.line = firstLine;
+            b.col += firstLineLength;
+            ed.bookmarks.set(i, b);
+        }
+        else if (b.line > firstLine + 1)
+        {
+            --b.line;
             ed.bookmarks.set(i, b);
         }
     }

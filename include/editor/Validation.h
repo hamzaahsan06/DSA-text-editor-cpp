@@ -3,6 +3,7 @@
 
 #include <string>
 #include "ds/DoublyLinkedList.h"
+#include "editor/Editor.h"
 
 // Pure checks. They never print and never change the document, so every
 // module can call them before touching the text. The caller decides what
@@ -29,5 +30,15 @@ bool isValidRange(const DoublyLinkedList<std::string>& doc, int startLine, int e
 // endCol is exclusive, so startCol == endCol is an empty range.
 bool isValidColumnRange(const DoublyLinkedList<std::string>& doc, int line,
                         int startCol, int endCol);
+
+// Equivalent checks for the editor's Line-based document.
+bool isDocumentEmpty(const Editor& editor);
+bool isValidLine(const Editor& editor, int line);
+bool isValidColumn(const Editor& editor, int line, int col);
+bool isValidRange(const Editor& editor, int startLine, int endLine);
+bool isValidColumnRange(const Editor& editor, int line, int startCol, int endCol);
+
+// Replacement text must remain within one logical line.
+bool isValidReplacementText(const std::string& text);
 
 #endif // EDITOR_VALIDATION_H

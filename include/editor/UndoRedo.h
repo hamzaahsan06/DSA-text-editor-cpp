@@ -22,6 +22,10 @@ public:
     bool recordReplace(Editor &ed, int line, int col,
                        const std::string &oldText, const std::string &newText);
 
+    // Records a complete line replacement as one undoable operation.
+    bool recordReplaceLine(Editor &ed, int line,
+                           const std::string &oldText, const std::string &newText);
+
     // Reverts the most recent command. O(m) where m = text touched.
     bool undo(Editor &ed);
 

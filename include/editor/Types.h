@@ -57,4 +57,6 @@ struct Command {
     int fmtStart = 0;
     int fmtEnd = 0;
     FormatType fmtType = BOLD;
+    // REPLACE commands with this flag store complete line snapshots in oldText/newText.
+    bool wholeLine = false;
 };

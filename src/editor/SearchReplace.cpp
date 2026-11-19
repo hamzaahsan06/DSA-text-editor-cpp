@@ -4,6 +4,9 @@
 #include "editor/Editor.h"
 #include "editor/Types.h"
 #include "editor/UndoRedo.h"
+#include "editor/Bookmarks.h"
+#include "editor/Formatting.h"
+#include "editor/Validation.h"
 
 // Finds first match of pattern in text at/after startPos; returns -1 if none. O(n*m).
 int findSubstring(const std::string &text, const std::string &pattern, int startPos)
@@ -28,7 +31,7 @@ int findSubstring(const std::string &text, const std::string &pattern, int start
     return -1;
 }
 
-// Collects every match (overlapping included) across all lines. O(L*n*m).
+// Collects non-overlapping matches across all lines. O(L*n*m).
 DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
 {
     DynamicArray<Position> results;
@@ -52,7 +55,7 @@ DynamicArray<Position> searchAll(Editor &ed, const std::string &pattern)
             p.line = li;
             p.col = idx;
             results.pushBack(p);
-            start = idx + 1; // allow overlapping matches
+            start = idx + static_cast<int>(pattern.size());
         }
     }
     return results;
@@ -95,10 +98,21 @@ void displaySearchResults(const DynamicArray<Position> &results, std::ostream &o
     }
 }
 
+void displaySearchResults(const DynamicArray<Position>& results,
+                          const std::string& pattern, std::ostream& out)
+{
+    if (isEmptyString(pattern))
+    {
+        out << "Error: search pattern cannot be empty.\n";
+        return;
+    }
+    displaySearchResults(results, out);
+}
+
 // Replaces the nth match (1-based); records REPLACE via UndoRedo. O(L*n*m + n).
 bool replaceOccurrence(Editor &ed, const std::string &pattern, const std::string &newStr, int n)
 {
-    if (pattern.empty())
+    if (isEmptyString(pattern) || !isValidReplacementText(newStr))
         return false;
     if (n < 1)
         return false;
@@ -137,15 +151,18 @@ bool replaceOccurrence(Editor &ed, const std::string &pattern, const std::string
                 if (!undoRedo.recordReplace(ed, li, idx, pattern, newStr))
                     return false;
 
-                line->text = result;
+                adjustBookmarksOnTextDelete(ed, li, idx, static_cast<int>(pattern.size()));
+                adjustBookmarksOnTextInsert(ed, li, idx, static_cast<int>(newStr.size()));
+                Formatting formatting;
+                formatting.onDeleteText(ed, li, idx, static_cast<int>(pattern.size()));
+                formatting.onInsertText(ed, li, idx, static_cast<int>(newStr.size()));
 
-                // TODO: shift format spans
-                // (line length changed; format spans after idx may need adjusting.)
+                line->text = result;
 
                 ed.setModified(true);
                 return true;
             }
-            start = idx + 1; // allow overlapping matches to match searchAll semantics
+            start = idx + static_cast<int>(pattern.size());
         }
     }
     return false;
@@ -155,7 +172,7 @@ bool replaceOccurrence(Editor &ed, const std::string &pattern, const std::string
 // O(L*n*m + R*n).
 int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr)
 {
-    if (pattern.empty())
+    if (isEmptyString(pattern) || !isValidReplacementText(newStr))
         return 0;
     if (ed.getLineCount() == 0)
         return 0;
@@ -176,6 +193,7 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
 
         int start = 0;
         int replacedOnThisLine = 0;
+        DynamicArray<int> replacementCols;
         while (true)
         {
             int idx = findSubstring(src, pattern, start);
@@ -189,14 +207,12 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
             for (int k = start; k < idx; ++k)
                 out += src[k];
 
-            // Record each replacement through UndoRedo.
-            if (!undoRedo.recordReplace(ed, li, idx, pattern, newStr))
-                break;
+            const int currentCol = static_cast<int>(out.size());
+            replacementCols.pushBack(currentCol);
 
             for (int k = 0; k < (int)newStr.length(); ++k)
                 out += newStr[k];
 
-            ++total;
             ++replacedOnThisLine;
 
             // Continue AFTER the inserted text to avoid infinite loops.
@@ -205,9 +221,23 @@ int replaceAll(Editor &ed, const std::string &pattern, const std::string &newStr
 
         if (replacedOnThisLine > 0)
         {
+            if (!undoRedo.recordReplaceLine(ed, li, src, out))
+                continue;
+            for (int i = 0; i < replacementCols.size(); ++i)
+            {
+                const int col = replacementCols[i];
+                adjustBookmarksOnTextDelete(ed, li, col, static_cast<int>(pattern.size()));
+                adjustBookmarksOnTextInsert(ed, li, col, static_cast<int>(newStr.size()));
+            }
             line->text = out;
-            // TODO: shift format spans
-            // (line length changed; format spans may need adjusting.)
+            Formatting formatting;
+            for (int i = 0; i < replacementCols.size(); ++i)
+            {
+                const int col = replacementCols[i];
+                formatting.onDeleteText(ed, li, col, static_cast<int>(pattern.size()));
+                formatting.onInsertText(ed, li, col, static_cast<int>(newStr.size()));
+            }
+            total += replacedOnThisLine;
         }
     }
 
