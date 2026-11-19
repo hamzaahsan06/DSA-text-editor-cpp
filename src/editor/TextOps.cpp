@@ -67,7 +67,9 @@ static void shiftSpansOnInsert(Line &line, int col, int length)
             continue;
         if (span.startCol >= col)
             span.startCol += length;
-        if (span.endCol >= col)
+        // endCol is exclusive: text typed exactly at the end of a span is
+        // outside it, so the span only grows when the insert is strictly inside.
+        if (span.endCol > col)
             span.endCol += length;
         line.formats.set(i, span);
     }
@@ -112,6 +114,48 @@ static void shiftSpansOnDelete(Line &line, int startCol, int endCol)
     }
 }
 
+// Splits the spans of `first` at column `col` when its text is cut in two.
+// Spans ending at or before col stay on `first`; spans starting at or after col
+// move to `second` with their columns reduced by col; a span that crosses col is
+// cut into two pieces, one on each line.
+static void splitSpansAtColumn(Line &first, Line &second, int col)
+{
+    DynamicArray<FormatSpan> keep;
+    DynamicArray<FormatSpan> moved;
+
+    for (int i = 0; i < first.formats.size(); ++i)
+    {
+        FormatSpan span;
+        if (!first.formats.get(i, span))
+            continue;
+
+        if (span.endCol <= col)
+        {
+            keep.pushBack(span);
+        }
+        else if (span.startCol >= col)
+        {
+            span.startCol -= col;
+            span.endCol -= col;
+            moved.pushBack(span);
+        }
+        else
+        {
+            FormatSpan head = span;
+            head.endCol = col;
+            keep.pushBack(head);
+
+            FormatSpan tail = span;
+            tail.startCol = 0;
+            tail.endCol = span.endCol - col;
+            moved.pushBack(tail);
+        }
+    }
+
+    first.formats = keep;
+    second.formats = moved;
+}
+
 bool insertText(Editor &ed, int line, int col, const std::string &text)
 {
     if (isEmptyString(text))
@@ -154,6 +198,7 @@ bool insertNewLine(Editor &ed, int line, int col)
     Line below;
     below.text = target->text.substr(col);
     target->text.erase(col);
+    splitSpansAtColumn(*target, below, col);
     ed.document.insertAtPosition(line + 1, below);
     adjustBookmarksOnLineInsert(ed, line + 1);
 

@@ -16,12 +16,15 @@
 // Insert text into one line at (line, col). col == line length appends.
 // text must not be empty and must not contain '\n' (use insertNewLine).
 // If the document has no lines, (0, 0) first creates one empty line.
+// Format spans at or after col shift right; a span grows only when the text
+// goes strictly inside it (inserting exactly at its end does not extend it).
 // Cursor ends just after the inserted text.
 bool insertText(Editor& ed, int line, int col, const std::string& text);
 
 // Split a line at (line, col): the text from col onward moves to a new line
 // below. col == line length adds an empty line below; col == 0 pushes the whole
 // line down. If the document has no lines, (0, 0) first creates one empty line.
+// Format spans are divided between the two lines (a span crossing col is cut).
 // Cursor ends at the start of the new line.
 bool insertNewLine(Editor& ed, int line, int col);
 

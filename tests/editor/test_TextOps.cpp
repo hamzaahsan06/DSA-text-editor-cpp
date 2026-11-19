@@ -128,7 +128,96 @@ void test_insert_text_shifts_formats()
     CHECK(out.endCol == 7);
 }
 
+// endCol is exclusive: text typed exactly at the end of a span is outside it,
+// text at its start pushes it right, and text strictly inside makes it longer.
+void test_insert_text_span_boundaries()
+{
+    FormatSpan s; s.startCol = 2; s.endCol = 5; s.type = BOLD;
+    FormatSpan out;
+
+    const std::string lines[] = { "abcdef" };
+
+    Editor atEnd; makeEditorWith(lines, 1, atEnd);
+    atEnd.getLine(0)->formats.pushBack(s);
+    CHECK(insertText(atEnd, 0, 5, "Z") == true);
+    CHECK(atEnd.getLine(0)->formats.get(0, out));
+    CHECK(out.startCol == 2 && out.endCol == 5);        // not extended
+
+    Editor atStart; makeEditorWith(lines, 1, atStart);
+    atStart.getLine(0)->formats.pushBack(s);
+    CHECK(insertText(atStart, 0, 2, "Z") == true);
+    CHECK(atStart.getLine(0)->formats.get(0, out));
+    CHECK(out.startCol == 3 && out.endCol == 6);        // pushed right, same length
+
+    Editor inside; makeEditorWith(lines, 1, inside);
+    inside.getLine(0)->formats.pushBack(s);
+    CHECK(insertText(inside, 0, 3, "Z") == true);
+    CHECK(inside.getLine(0)->formats.get(0, out));
+    CHECK(out.startCol == 2 && out.endCol == 6);        // grew by one
+}
+
 // ---------- insertNewLine ----------
+
+// Splitting a line divides its format spans: spans before the cut stay, spans
+// after it move to the new line with columns reduced, a crossing span is cut.
+void test_insert_new_line_splits_formats()
+{
+    const std::string lines[] = { "abcdefgh" };
+    Editor ed; makeEditorWith(lines, 1, ed);
+    FormatSpan a; a.startCol = 0; a.endCol = 2; a.type = BOLD;         // before the cut
+    FormatSpan b; b.startCol = 3; b.endCol = 6; b.type = ITALIC;       // crosses the cut
+    FormatSpan c; c.startCol = 6; c.endCol = 8; c.type = BOLD_ITALIC;  // after the cut
+    ed.getLine(0)->formats.pushBack(a);
+    ed.getLine(0)->formats.pushBack(b);
+    ed.getLine(0)->formats.pushBack(c);
+
+    CHECK(insertNewLine(ed, 0, 4) == true);                // "abcd" | "efgh"
+    CHECK(ed.getLine(0)->text == "abcd");
+    CHECK(ed.getLine(1)->text == "efgh");
+
+    FormatSpan s;
+    CHECK(ed.getLine(0)->formats.size() == 2);
+    CHECK(ed.getLine(0)->formats.get(0, s));
+    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == BOLD);
+    CHECK(ed.getLine(0)->formats.get(1, s));
+    CHECK(s.startCol == 3 && s.endCol == 4 && s.type == ITALIC);       // head of b
+
+    CHECK(ed.getLine(1)->formats.size() == 2);
+    CHECK(ed.getLine(1)->formats.get(0, s));
+    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == ITALIC);       // tail of b
+    CHECK(ed.getLine(1)->formats.get(1, s));
+    CHECK(s.startCol == 2 && s.endCol == 4 && s.type == BOLD_ITALIC);  // c, moved
+}
+
+// A cut exactly between two spans gives each line one whole span.
+void test_insert_new_line_split_on_span_boundary()
+{
+    const std::string lines[] = { "abcd" };
+    Editor ed; makeEditorWith(lines, 1, ed);
+    FormatSpan a; a.startCol = 0; a.endCol = 2; a.type = BOLD;
+    FormatSpan b; b.startCol = 2; b.endCol = 4; b.type = ITALIC;
+    ed.getLine(0)->formats.pushBack(a);
+    ed.getLine(0)->formats.pushBack(b);
+
+    CHECK(insertNewLine(ed, 0, 2) == true);
+    FormatSpan s;
+    CHECK(ed.getLine(0)->formats.size() == 1);
+    CHECK(ed.getLine(0)->formats.get(0, s));
+    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == BOLD);
+    CHECK(ed.getLine(1)->formats.size() == 1);
+    CHECK(ed.getLine(1)->formats.get(0, s));
+    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == ITALIC);
+}
+
+// A line with no formatting splits into two lines with none.
+void test_insert_new_line_split_without_formats()
+{
+    const std::string lines[] = { "abcd" };
+    Editor ed; makeEditorWith(lines, 1, ed);
+    CHECK(insertNewLine(ed, 0, 2) == true);
+    CHECK(ed.getLine(0)->formats.size() == 0);
+    CHECK(ed.getLine(1)->formats.size() == 0);
+}
 
 void test_insert_new_line_mid()
 {
@@ -497,6 +586,10 @@ int main()
     test_insert_text_empty_document_rejects_other_positions();
     test_insert_text_second_line();
     test_insert_text_shifts_formats();
+    test_insert_text_span_boundaries();
+    test_insert_new_line_splits_formats();
+    test_insert_new_line_split_on_span_boundary();
+    test_insert_new_line_split_without_formats();
 
     test_insert_new_line_mid();
     test_insert_new_line_at_col_zero();

@@ -33,21 +33,17 @@ static void writeRawFile(const std::string& path, const std::string& content)
     out.close();
 }
 
-// Reads an entire file into a string; returns "" if the file can't be opened.
+// Reads an entire file into a string, exactly as stored (including a final
+// '\n'); returns "" if the file can't be opened.
 // Opened in text mode so Windows normalizes "\r\n" back to "\n".
 static std::string readRawFile(const std::string& path)
 {
     std::ifstream in(path.c_str());    // text mode
     if (!in.is_open()) return "";
     std::string content;
-    std::string line;
-    bool first = true;
-    while (std::getline(in, line))
-    {
-        if (!first) content += "\n";
-        content += line;
-        first = false;
-    }
+    char c;
+    while (in.get(c))
+        content += c;
     return content;
 }
 
@@ -304,7 +300,7 @@ void test_save_to_existing_filename()
 
     CHECK(saveFile(ed) == true);
     CHECK(ed.isModified() == false);
-    CHECK(readRawFile(path) == "alpha\nbeta\ngamma");
+    CHECK(readRawFile(path) == "alpha\nbeta\ngamma\n");   // every line ends with '\n'
 
     std::remove(path.c_str());
 }
@@ -328,7 +324,7 @@ void test_save_as_writes_and_sets_filename()
     CHECK(saveFileAs(ed, path) == true);
     CHECK(ed.getFilename() == path);
     CHECK(ed.isModified() == false);
-    CHECK(readRawFile(path) == "x\ny");
+    CHECK(readRawFile(path) == "x\ny\n");
 
     std::remove(path.c_str());
 }
@@ -363,7 +359,49 @@ void test_save_then_open_round_trip()
     std::remove(path.c_str());
 }
 
-// A new document (one empty line) saves as an empty file and opens back
+// Empty lines at the end (and in the middle) must survive save + reopen:
+// the line count after reopening must equal the line count that was saved.
+void test_save_then_open_keeps_trailing_empty_lines()
+{
+    const std::string path = "test_trailing_empty_tmp.txt";
+    const std::string lines[] = { "a", "", "b", "", "" };
+    Editor ed; makeEditorWith(lines, 5, ed);
+    CHECK(saveFileAs(ed, path) == true);
+    CHECK(readRawFile(path) == "a\n\nb\n\n\n");
+
+    Editor ed2;
+    CHECK(openFile(ed2, path) == true);
+    CHECK(ed2.getLineCount() == 5);
+    CHECK(ed2.getLine(0)->text == "a");
+    CHECK(ed2.getLine(1)->text == "");
+    CHECK(ed2.getLine(2)->text == "b");
+    CHECK(ed2.getLine(3)->text == "");
+    CHECK(ed2.getLine(4)->text == "");
+
+    // Saving again must not change the file (no extra or missing lines each cycle).
+    CHECK(saveFileAs(ed2, path) == true);
+    CHECK(readRawFile(path) == "a\n\nb\n\n\n");
+
+    std::remove(path.c_str());
+}
+
+// A file that does not end with a newline still opens fully, and is saved
+// back with the final newline.
+void test_open_file_without_final_newline_then_save()
+{
+    const std::string path = "test_no_final_newline_tmp.txt";
+    writeRawFile(path, "one\ntwo");
+
+    Editor ed;
+    CHECK(openFile(ed, path) == true);
+    CHECK(ed.getLineCount() == 2);
+    CHECK(saveFile(ed) == true);
+    CHECK(readRawFile(path) == "one\ntwo\n");
+
+    std::remove(path.c_str());
+}
+
+// A new document (one empty line) saves as one newline and opens back
 // as the same single empty line.
 void test_save_then_open_new_document()
 {
@@ -371,7 +409,7 @@ void test_save_then_open_new_document()
     Editor ed;
     CHECK(newDocument(ed) == true);
     CHECK(saveFileAs(ed, path) == true);
-    CHECK(readRawFile(path) == "");
+    CHECK(readRawFile(path) == "\n");
 
     Editor ed2; makeDirty(ed2);
     CHECK(openFile(ed2, path) == true);
@@ -458,6 +496,8 @@ int main()
     test_save_then_open_round_trip();
     test_save_then_open_empty_middle_line();
     test_save_then_open_new_document();
+    test_save_then_open_keeps_trailing_empty_lines();
+    test_open_file_without_final_newline_then_save();
     test_save_as_changes_state_only_on_success();
 
     test_exit_unmodified();

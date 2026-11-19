@@ -3,7 +3,9 @@
 #include <fstream>
 #include <iostream>
 
-// Write every line to path, one per line. Returns false on any I/O error.
+// Write every line to path, each one ending with '\n'. Returns false on any I/O error.
+// Ending every line (including the last) is what lets openFile read back exactly
+// the same number of lines: without it, a trailing empty line would be lost.
 // Walks nodes via getHead()/next so the whole save is O(n).
 static bool writeToFile(Editor &ed, const std::string &path)
 {
@@ -14,9 +16,7 @@ static bool writeToFile(Editor &ed, const std::string &path)
     typedef DoublyLinkedList<Line>::Node Node;
     for (Node *cur = ed.document.getHead(); cur != nullptr; cur = cur->next)
     {
-        out << cur->data.text;
-        if (cur->next != nullptr)
-            out << '\n';
+        out << cur->data.text << '\n';
     }
     out.flush();
     return out.good();
