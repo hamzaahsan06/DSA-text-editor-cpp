@@ -20,9 +20,10 @@ private:
     int windowLines;     // Max lines shown around the cursor.
 
     // Command handlers, one per command. Each receives the token list
-    // so it can parse its arguments, and writes its result into `message`.
+    // (and the raw line, for restOfLine) so it can parse its arguments,
+    // and writes its result into `message`.
     void cmdNew(const DynamicArray<Token> &tok);
-    void cmdOpen(const DynamicArray<Token> &tok);
+    void cmdOpen(const std::string &line, const DynamicArray<Token> &tok);
     void cmdSave(const DynamicArray<Token> &tok);
     void cmdSaveAs(const DynamicArray<Token> &tok);
     void cmdExit(const DynamicArray<Token> &tok);
@@ -33,6 +34,27 @@ private:
     void cmdHelp(const DynamicArray<Token> &tok);
     void cmdUndo(const DynamicArray<Token> &tok);
     void cmdRedo(const DynamicArray<Token> &tok);
+
+    // EDIT command handlers.
+    void cmdIns(const std::string &line, const DynamicArray<Token> &tok);
+    void cmdAdd(const std::string &line, const DynamicArray<Token> &tok);
+    void cmdNl(const DynamicArray<Token> &tok);
+    void cmdDel(const DynamicArray<Token> &tok);
+    void cmdDelw(const DynamicArray<Token> &tok);
+    void cmdDelr(const DynamicArray<Token> &tok);
+    void cmdDell(const DynamicArray<Token> &tok);
+
+    // SEARCH command handlers.
+    void cmdFind(const std::string &line, const DynamicArray<Token> &tok);
+    void cmdReplace(const DynamicArray<Token> &tok);
+    void cmdReplaceAll(const DynamicArray<Token> &tok);
+
+    // BOOKMARK command handlers.
+    void cmdMark(const DynamicArray<Token> &tok);
+    void cmdMarks(const DynamicArray<Token> &tok);
+    void cmdJump(const DynamicArray<Token> &tok);
+    void cmdUnmark(const DynamicArray<Token> &tok);
+    void cmdBack(const DynamicArray<Token> &tok);
 
     // Asks the user whether to save changes before a destructive command.
     // Returns true if it is safe to proceed (yes/no), false if cancelled.
