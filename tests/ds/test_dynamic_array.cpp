@@ -1,3 +1,5 @@
+// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/ds/test_dynamic_array.cpp -o build/test_dynamic_array ; if ($?) { ./build/test_dynamic_array }
+
 #include <iostream>
 #include "check.h"
 #include "../../include/ds/DynamicArray.h"

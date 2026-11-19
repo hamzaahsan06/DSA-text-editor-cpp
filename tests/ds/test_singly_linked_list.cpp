@@ -1,3 +1,5 @@
+// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/ds/test_singly_linked_list.cpp -o build/test_singly_linked_list ; if ($?) { ./build/test_singly_linked_list }
+
 #include <iostream>
 #include "check.h"
 #include "../../include/ds/SinglyLinkedList.h"

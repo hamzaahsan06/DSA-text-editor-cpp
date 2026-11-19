@@ -1,3 +1,5 @@
+// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/ds/test_Stack.cpp -o build/test_Stack ; if ($?) { ./build/test_Stack }
+
 #include <iostream>
 #include "check.h"
 #include "../../include/ds/Stack.h"

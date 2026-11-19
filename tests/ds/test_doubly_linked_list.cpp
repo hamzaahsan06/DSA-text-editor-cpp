@@ -1,4 +1,5 @@
-#include <iostream>
+// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/ds/test_doubly_linked_list.cpp -o build/test_doubly_linked_list ; if ($?) { ./build/test_doubly_linked_list }#include <iostream>
+
 #include "check.h"
 #include "../../include/ds/DoublyLinkedList.h"
 
