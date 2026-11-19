@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdio>
 #include "editor/EditorApp.h"
+#include "editor/Screen.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
 #include "../ds/check.h"
@@ -75,7 +76,6 @@ void test_goto_line_only()
     EditorApp app;
     std::istringstream in("");
     setupApp(app, in);
-    // Add two more lines so we have 3 total.
     Line l1;
     l1.text = "aaa";
     Line l2;
@@ -264,8 +264,6 @@ void test_undo_more_than_available()
     EditorApp app;
     std::istringstream in("");
     setupApp(app, in);
-    // Push a fake command onto the undo stack via the editor's stack.
-    // (We use the undo stack directly, since TextOps isn't in scope here.)
     Command c;
     c.type = INSERT_TEXT;
     c.startLine = 0;
@@ -282,27 +280,17 @@ void test_undo_more_than_available()
     CHECK(app.getMessage() == "Undid 1 operation(s).");
 }
 
-// ---------- unknown / not-implemented ----------
+// ---------- unknown command ----------
 
-// Unknown command prints "Unknown command".
-void test_unknown()
+// Truly unknown command prints "Unknown command" and mentions help.
+void test_unknown_with_hint()
 {
     EditorApp app;
     std::istringstream in("");
     setupApp(app, in);
-    app.handleLine("xyzzy");
+    app.handleLine("xyzzynotacommand");
     CHECK(app.getMessage().find("Unknown command") != std::string::npos);
-}
-
-// Known command not in our impl list -> "Not implemented yet.".
-void test_not_implemented()
-{
-    EditorApp app;
-    std::istringstream in("");
-    setupApp(app, in);
-    app.handleLine("find hello");
-    CHECK(app.getMessage().find("Not implemented yet") != std::string::npos);
-    CHECK(app.getMessage().find("Usage:") != std::string::npos);
+    CHECK(app.getMessage().find("help") != std::string::npos);
 }
 
 // Blank line clears the message.
@@ -311,7 +299,6 @@ void test_blank_line()
     EditorApp app;
     std::istringstream in("");
     setupApp(app, in);
-    app.getMessage(); // no-op
     app.handleLine("info");
     CHECK(app.getMessage() != "");
     app.handleLine("   ");
@@ -376,6 +363,7 @@ void test_exit_unmodified()
 // exit with changes and answer "n" discards and stops.
 void test_exit_discard_with_n()
 {
+    OutputCapture cap; // swallow the interactive prompt
     EditorApp app;
     std::istringstream in("n\n");
     setupApp(app, in);
@@ -387,6 +375,7 @@ void test_exit_discard_with_n()
 // exit with changes and answer "c" cancels, loop keeps going.
 void test_exit_cancel_with_c()
 {
+    OutputCapture cap;
     EditorApp app;
     std::istringstream in("c\n");
     setupApp(app, in);
@@ -396,11 +385,10 @@ void test_exit_cancel_with_c()
     CHECK(app.getMessage().find("Cancelled") != std::string::npos);
 }
 
-// ---------- unsaved guard with junk answer ----------
-
 // Junk-then-n: asks again, then discards on "n".
 void test_exit_junk_then_n()
 {
+    OutputCapture cap;
     EditorApp app;
     std::istringstream in("x\nn\n");
     setupApp(app, in);
@@ -438,8 +426,7 @@ int main()
     test_undo_huge_number();
     test_undo_more_than_available();
 
-    test_unknown();
-    test_not_implemented();
+    test_unknown_with_hint();
     test_blank_line();
 
     test_save_no_filename();
