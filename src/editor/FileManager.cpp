@@ -24,9 +24,10 @@ static bool writeToFile(Editor &ed, const std::string &path)
 
 bool newDocument(Editor &ed)
 {
-    ed.document.clear();
-    ed.setFilename("");
-    ed.setModified(false);
+    // reset() clears the document, both stacks and the bookmarks, puts the
+    // cursor at (0, 0), clears the filename and the modified flag, and leaves
+    // one empty line to type into.
+    ed.reset();
     return true;
 }
 
@@ -63,7 +64,22 @@ bool openFile(Editor &ed, const std::string &path)
         return false;
     }
 
+    // The file was read completely, so from here on nothing can fail.
+    // An empty file becomes one empty line, same as a new document.
+    if (temp.isEmpty())
+    {
+        Line blank;
+        temp.insertAtTail(blank);
+    }
+
+    // Replace the document and drop everything that referred to the old one:
+    // undoing into a different file would corrupt the editor.
     ed.document = temp;
+    ed.undoStack.clear();
+    ed.redoStack.clear();
+    ed.bookmarks.clear();
+    ed.cursorLine = 0;
+    ed.cursorCol = 0;
     ed.setFilename(path);
     ed.setModified(false);
     return true;
