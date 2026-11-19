@@ -1,253 +1,264 @@
-// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_Formatting.cpp src/editor/Formatting.cpp -o build/test_Formatting ; if ($?) { ./build/test_Formatting }
+// g++ -std=c++11 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_formatting.cpp src/editor/Formatting.cpp -o build/test_formatting ; if ($?) { ./build/test_formatting }
 
 #include <iostream>
 #include <string>
 #include "editor/Formatting.h"
+#include "editor/Types.h"
 #include "../ds/check.h"
 
 // ---------- addFormat ----------
 
-// Rejects negative start, end < start, and no-bold-no-italic spans.
-void test_add_format_rejects_bad_input()
+// Adding a BOLD span succeeds.
+void test_add_bold_span()
 {
-    Formatting f;
-    CHECK(f.addFormat(-1, 2, true, false) == false);
-    CHECK(f.addFormat(2, 1, true, false) == false);
-    CHECK(f.addFormat(1, 1, false, false) == false);
-    CHECK(f.count() == 0);
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, 0, 2, true, false) == true);
+    CHECK(l.formats.size() == 1);
+    FormatSpan s; l.formats.get(0, s);
+    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == BOLD);
 }
 
-// Adds a BOLD span: applying produces the bold escape around the covered chars.
-void test_add_format_bold()
+// Adding an ITALIC span succeeds.
+void test_add_italic_span()
 {
-    Formatting f;
-    CHECK(f.addFormat(0, 4, true, false) == true);
-    CHECK(f.count() == 1);
-    std::string got = f.applyFormatting("abc");
-    std::string want =
-        "\033[1m" "a" "\033[0m"
-        "\033[1m" "b" "\033[0m"
-        "\033[1m" "c" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, 1, 4, false, true) == true);
+    CHECK(l.formats.size() == 1);
+    FormatSpan s; l.formats.get(0, s);
+    CHECK(s.type == ITALIC);
 }
 
-// Adds an ITALIC span: applying produces the italic escape.
-void test_add_format_italic()
+// Adding a BOLD_ITALIC span succeeds.
+void test_add_bold_italic_span()
 {
-    Formatting f;
-    CHECK(f.addFormat(2, 5, false, true) == true);
-    CHECK(f.count() == 1);
-    // Line shorter than startCol: no effect.
-    CHECK(f.applyFormatting("ab") == "ab");
-    // Line that reaches startCol: italic kicks in at column 2 onward.
-    std::string got = f.applyFormatting("abcd");
-    std::string want =
-        "ab"
-        "\033[3m" "c" "\033[0m"
-        "\033[3m" "d" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, 0, 5, true, true) == true);
+    CHECK(l.formats.size() == 1);
+    FormatSpan s; l.formats.get(0, s);
+    CHECK(s.type == BOLD_ITALIC);
 }
 
-// Adds a BOLD_ITALIC span: applying produces both codes.
-void test_add_format_bold_italic()
+// Rejects negative startCol.
+void test_add_negative_start_rejected()
 {
-    Formatting f;
-    CHECK(f.addFormat(1, 3, true, true) == true);
-    CHECK(f.count() == 1);
-    std::string got = f.applyFormatting("abcd");
-    std::string want =
-        "a"
-        "\033[1m" "\033[3m" "b" "\033[0m"
-        "\033[1m" "\033[3m" "c" "\033[0m"
-        "\033[1m" "\033[3m" "d" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, -1, 2, true, false) == false);
+    CHECK(l.formats.size() == 0);
 }
 
-// Zero-length span (start == end) is accepted.
-void test_add_format_zero_length_accepted()
+// Rejects startCol >= endCol (inverted or zero-length range).
+void test_add_inverted_or_zero_range_rejected()
 {
-    Formatting f;
-    CHECK(f.addFormat(2, 2, true, false) == true);
-    CHECK(f.count() == 1);
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, 2, 2, true, false) == false);
+    CHECK(addFormat(l, 3, 1, true, false) == false);
+    CHECK(l.formats.size() == 0);
+}
+
+// Rejects endCol > text length.
+void test_add_end_past_text_rejected()
+{
+    Line l; l.text = "abc";
+    CHECK(addFormat(l, 0, 4, true, false) == false);
+    CHECK(l.formats.size() == 0);
+}
+
+// Rejects no-bold-no-italic.
+void test_add_plain_span_rejected()
+{
+    Line l; l.text = "hello";
+    CHECK(addFormat(l, 0, 2, false, false) == false);
+    CHECK(l.formats.size() == 0);
+}
+
+// endCol == text.length() is accepted.
+void test_add_end_equals_length_accepted()
+{
+    Line l; l.text = "abc";
+    CHECK(addFormat(l, 0, 3, true, false) == true);
+    CHECK(l.formats.size() == 1);
 }
 
 // ---------- removeFormat ----------
 
-// Removes the span at a valid index; the surviving span still applies.
-void test_remove_format_valid()
+// Removes a span at a valid index.
+void test_remove_valid_index()
 {
-    Formatting f;
-    f.addFormat(0, 1, true, false);    // bold on cols 0..1
-    f.addFormat(2, 3, false, true);    // italic on cols 2..3
-    CHECK(f.count() == 2);
-
-    CHECK(f.removeFormat(0) == true);
-    CHECK(f.count() == 1);
-
-    // After removing the bold span, only italic remains on cols 2..3.
-    std::string got = f.applyFormatting("abcd");
-    std::string want =
-        "ab"
-        "\033[3m" "c" "\033[0m"
-        "\033[3m" "d" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "hello";
+    addFormat(l, 0, 2, true, false);
+    addFormat(l, 2, 4, false, true);
+    CHECK(l.formats.size() == 2);
+    CHECK(removeFormat(l, 0) == true);
+    CHECK(l.formats.size() == 1);
 }
 
-// Rejects out-of-range indexes (negative and >= count).
-void test_remove_format_invalid()
+// Rejects bad indices.
+void test_remove_bad_index()
 {
-    Formatting f;
-    f.addFormat(0, 2, true, false);
-    CHECK(f.removeFormat(-1) == false);
-    CHECK(f.removeFormat(1) == false);
-    CHECK(f.removeFormat(99) == false);
-    CHECK(f.count() == 1);
+    Line l; l.text = "hello";
+    addFormat(l, 0, 2, true, false);
+    CHECK(removeFormat(l, -1) == false);
+    CHECK(removeFormat(l, 1) == false);
+    CHECK(removeFormat(l, 99) == false);
+    CHECK(l.formats.size() == 1);
 }
 
-// ---------- clearFormats / count ----------
+// ---------- clearFormats ----------
 
-// clearFormats empties the span list; applyFormatting then has no effect.
-void test_clear_and_count()
+// Removes all spans.
+void test_clear_formats()
 {
-    Formatting f;
-    CHECK(f.count() == 0);
-    f.addFormat(0, 1, true, false);
-    f.addFormat(2, 3, false, true);
-    CHECK(f.count() == 2);
-
-    CHECK(f.applyFormatting("abcd") != "abcd");   // some formatting was applied
-
-    f.clearFormats();
-    CHECK(f.count() == 0);
-    CHECK(f.applyFormatting("abcd") == "abcd");   // now no formatting
+    Line l; l.text = "hello";
+    addFormat(l, 0, 2, true, false);
+    addFormat(l, 2, 4, false, true);
+    CHECK(l.formats.size() == 2);
+    clearFormats(l);
+    CHECK(l.formats.size() == 0);
 }
 
-// ---------- applyFormatting ----------
+// ---------- renderLine (ANSI) ----------
 
-// Empty line returns empty string regardless of spans.
-void test_apply_empty_line()
+// Empty line renders as empty string.
+void test_render_empty_line_ansi()
 {
-    Formatting f;
-    f.addFormat(0, 5, true, false);
-    CHECK(f.applyFormatting("") == "");
+    Line l;
+    CHECK(renderLine(l, true) == "");
 }
 
-// No spans returns the line unchanged (no ANSI codes).
-void test_apply_no_spans()
+// No spans returns the text unchanged.
+void test_render_no_spans_ansi()
 {
-    Formatting f;
-    CHECK(f.applyFormatting("hello") == "hello");
+    Line l; l.text = "hello";
+    CHECK(renderLine(l, true) == "hello");
 }
 
-// BOLD wraps only the covered characters with \033[1m ... \033[0m.
-void test_apply_bold()
+// Span at start renders codes only around the covered part.
+void test_render_span_at_start_ansi()
 {
-    Formatting f;
-    f.addFormat(1, 3, true, false);
-    std::string got = f.applyFormatting("abcde");
-    std::string want =
-        "a"
-        "\033[1m" "b" "\033[0m"
-        "\033[1m" "c" "\033[0m"
-        "\033[1m" "d" "\033[0m"
-        "e";
-    CHECK(got == want);
+    Line l; l.text = "abcde";
+    addFormat(l, 0, 2, true, false);
+    CHECK(renderLine(l, true) == "\033[1mab\033[0m" "cde");
 }
 
-// ITALIC wraps only the covered characters with \033[3m ... \033[0m.
-void test_apply_italic()
+// Span at end renders codes only around the covered part.
+void test_render_span_at_end_ansi()
 {
-    Formatting f;
-    f.addFormat(0, 1, false, true);
-    std::string got = f.applyFormatting("abc");
-    std::string want =
-        "\033[3m" "a" "\033[0m"
-        "\033[3m" "b" "\033[0m"
-        "c";
-    CHECK(got == want);
+    Line l; l.text = "abcde";
+    addFormat(l, 3, 5, true, false);
+    CHECK(renderLine(l, true) == "abc" "\033[1mde\033[0m");
 }
 
-// BOLD_ITALIC emits both codes in order (bold then italic).
-void test_apply_bold_italic()
+// Adjacent spans of different styles change codes without redundant resets.
+void test_render_adjacent_spans_ansi()
 {
-    Formatting f;
-    f.addFormat(0, 0, true, true);
-    std::string got = f.applyFormatting("x");
-    std::string want = "\033[1m" "\033[3m" "x" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "abcd";
+    addFormat(l, 0, 2, true, false);  // Bold
+    addFormat(l, 2, 4, false, true);  // Italic
+    // Transition at index 2 should close bold and open italic.
+    CHECK(renderLine(l, true) == "\033[1mab\033[0m" "\033[3mcd\033[0m");
 }
 
-// Two overlapping spans combine: bold from one, italic from another.
-void test_apply_overlapping_spans()
+// Overlapping spans combine: bold+italic overlap.
+void test_render_overlapping_spans_ansi()
 {
-    Formatting f;
-    f.addFormat(0, 2, true, false);
-    f.addFormat(1, 3, false, true);
-    std::string got = f.applyFormatting("abcd");
-    std::string want =
-        "\033[1m" "a" "\033[0m"
-        "\033[1m" "\033[3m" "b" "\033[0m"
-        "\033[1m" "\033[3m" "c" "\033[0m"
-        "\033[3m" "d" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "abcde";
+    addFormat(l, 0, 3, true, false);  // Bold 0..2
+    addFormat(l, 2, 5, false, true);  // Italic 2..4
+    // Col 0-1: bold only, Col 2: bold+italic, Col 3-4: italic only
+    CHECK(renderLine(l, true) == 
+        "\033[1mab\033[0m" 
+        "\033[1m\033[3mc\033[0m" 
+        "\033[3mde\033[0m");
 }
 
-// endCol is inclusive: a span [1,1] touches only one character.
-void test_apply_inclusive_end()
+// A span reaching past the text length ignores the bad part.
+void test_render_span_past_text_ansi()
 {
-    Formatting f;
-    f.addFormat(1, 1, true, false);
-    std::string got = f.applyFormatting("abc");
-    std::string want =
-        "a"
-        "\033[1m" "b" "\033[0m"
-        "c";
-    CHECK(got == want);
+    Line l; l.text = "abc";
+    // Force a bad span (bypassing addFormat safety)
+    FormatSpan s; s.startCol = 1; s.endCol = 99; s.type = BOLD;
+    l.formats.pushBack(s);
+    CHECK(renderLine(l, true) == "a\033[1mbc\033[0m");
 }
 
-// A span that lies fully beyond the line length has no effect.
-void test_apply_span_beyond_line()
+// ---------- renderLine (Fallback) ----------
+
+// Empty line renders as empty string.
+void test_render_empty_line_fallback()
 {
-    Formatting f;
-    f.addFormat(10, 20, true, false);
-    CHECK(f.applyFormatting("abc") == "abc");
+    Line l;
+    CHECK(renderLine(l, false) == "");
 }
 
-// A span partially covering the line only affects the in-range characters.
-void test_apply_span_partially_in_range()
+// No spans returns the text unchanged.
+void test_render_no_spans_fallback()
 {
-    Formatting f;
-    f.addFormat(1, 100, true, false);
-    std::string got = f.applyFormatting("abc");
-    std::string want =
-        "a"
-        "\033[1m" "b" "\033[0m"
-        "\033[1m" "c" "\033[0m";
-    CHECK(got == want);
+    Line l; l.text = "hello";
+    CHECK(renderLine(l, false) == "hello");
+}
+
+// Bold renders as **text**.
+void test_render_bold_fallback()
+{
+    Line l; l.text = "abc";
+    addFormat(l, 0, 2, true, false);
+    CHECK(renderLine(l, false) == "**ab**c");
+}
+
+// Italic renders as *text*.
+void test_render_italic_fallback()
+{
+    Line l; l.text = "abc";
+    addFormat(l, 1, 3, false, true);
+    CHECK(renderLine(l, false) == "a*bc*");
+}
+
+// Bold+Italic renders as ***text***.
+void test_render_bold_italic_fallback()
+{
+    Line l; l.text = "abcd";
+    addFormat(l, 1, 3, true, true);
+    CHECK(renderLine(l, false) == "a***bc***d");
+}
+
+// Adjacent different styles.
+void test_render_adjacent_spans_fallback()
+{
+    Line l; l.text = "abcd";
+    addFormat(l, 0, 2, true, false);  // **ab**
+    addFormat(l, 2, 4, false, true);  // *cd*
+    CHECK(renderLine(l, false) == "**ab***cd*");
 }
 
 int main()
 {
-    test_add_format_rejects_bad_input();
-    test_add_format_bold();
-    test_add_format_italic();
-    test_add_format_bold_italic();
-    test_add_format_zero_length_accepted();
+    test_add_bold_span();
+    test_add_italic_span();
+    test_add_bold_italic_span();
+    test_add_negative_start_rejected();
+    test_add_inverted_or_zero_range_rejected();
+    test_add_end_past_text_rejected();
+    test_add_plain_span_rejected();
+    test_add_end_equals_length_accepted();
 
-    test_remove_format_valid();
-    test_remove_format_invalid();
+    test_remove_valid_index();
+    test_remove_bad_index();
+    test_clear_formats();
 
-    test_clear_and_count();
+    test_render_empty_line_ansi();
+    test_render_no_spans_ansi();
+    test_render_span_at_start_ansi();
+    test_render_span_at_end_ansi();
+    test_render_adjacent_spans_ansi();
+    test_render_overlapping_spans_ansi();
+    test_render_span_past_text_ansi();
 
-    test_apply_empty_line();
-    test_apply_no_spans();
-    test_apply_bold();
-    test_apply_italic();
-    test_apply_bold_italic();
-    test_apply_overlapping_spans();
-    test_apply_inclusive_end();
-    test_apply_span_beyond_line();
-    test_apply_span_partially_in_range();
+    test_render_empty_line_fallback();
+    test_render_no_spans_fallback();
+    test_render_bold_fallback();
+    test_render_italic_fallback();
+    test_render_bold_italic_fallback();
+    test_render_adjacent_spans_fallback();
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;

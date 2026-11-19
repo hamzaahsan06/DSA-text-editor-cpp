@@ -596,6 +596,263 @@ void test_adjust_delete_below_all()
     CHECK(ed.bookmarks.get(findBookmark(ed, "q"), b) && b.line == 1);
     CHECK(getBookmarkCount(ed) == 2);
 }
+// Split then join with the same arguments returns every bookmark to its original position.
+void test_split_then_join_is_identity()
+{
+    const std::string lines[] = {"hello", "world", "foo"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
+    addBookmark(ed, "b1", 0, 0);
+    addBookmark(ed, "b2", 0, 3); // exactly at split? no, split at 2
+    addBookmark(ed, "b3", 1, 1);
+    addBookmark(ed, "b4", 2, 2);
+
+    adjustBookmarksOnSplit(ed, 0, 2);
+    adjustBookmarksOnJoin(ed, 0, 2);
+
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "b1"), b) && b.line == 0 && b.col == 0);
+    CHECK(ed.bookmarks.get(findBookmark(ed, "b2"), b) && b.line == 0 && b.col == 3);
+    CHECK(ed.bookmarks.get(findBookmark(ed, "b3"), b) && b.line == 1 && b.col == 1);
+    CHECK(ed.bookmarks.get(findBookmark(ed, "b4"), b) && b.line == 2 && b.col == 2);
+}
+
+// Bookmark exactly at the split column moves to the new line at col 0.
+void test_split_bookmark_exactly_at_split_col()
+{
+    const std::string lines[] = {"abcdef"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    addBookmark(ed, "mid", 0, 3);
+
+    adjustBookmarksOnSplit(ed, 0, 3);
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "mid"), b) && b.line == 1 && b.col == 0);
+}
+
+// Bookmark before the split col stays on the same line.
+void test_split_bookmark_before_col()
+{
+    const std::string lines[] = {"abcdef"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    addBookmark(ed, "before", 0, 1);
+
+    adjustBookmarksOnSplit(ed, 0, 3);
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "before"), b) && b.line == 0 && b.col == 1);
+}
+
+// Bookmark at line end (col == split col) moves to the new line at col 0.
+void test_split_bookmark_at_line_end()
+{
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    addBookmark(ed, "end", 0, 3);
+
+    adjustBookmarksOnSplit(ed, 0, 3);
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "end"), b) && b.line == 1 && b.col == 0);
+}
+
+// Join handles a bookmark on the merged-in line, adding the col offset.
+void test_join_bookmark_on_second_half()
+{
+    const std::string lines[] = {"abc", "def"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
+    addBookmark(ed, "second", 1, 2);
+
+    adjustBookmarksOnJoin(ed, 0, 3);
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "second"), b) && b.line == 0 && b.col == 5);
+}
+
+// Join moves bookmarks below line+1 up by one.
+void test_join_bookmark_below()
+{
+    const std::string lines[] = {"a", "b", "c"};
+    Editor ed;
+    makeEditorWith(lines, 3, ed);
+    addBookmark(ed, "below", 2, 0);
+
+    adjustBookmarksOnJoin(ed, 0, 1);
+    Bookmark b;
+    CHECK(ed.bookmarks.get(findBookmark(ed, "below"), b) && b.line == 1);
+}
+
+// The hidden "__previous" slot participates in split like any other bookmark.
+void test_split_handles_hidden_previous()
+{
+    const std::string lines[] = {"abcdef"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    ed.cursorLine = 0;
+    ed.cursorCol = 4;
+    savePreviousPosition(ed);
+
+    adjustBookmarksOnSplit(ed, 0, 2);
+    Bookmark b;
+    int idx = findBookmark(ed, "__previous");
+    CHECK(idx >= 0);
+    CHECK(ed.bookmarks.get(idx, b) && b.line == 1 && b.col == 2);
+}
+
+// collectBookmarksInLines collects only the ones in range, including hidden.
+void test_collect_bookmarks_in_lines()
+{
+    const std::string lines[] = {"a", "b", "c", "d"};
+    Editor ed;
+    makeEditorWith(lines, 4, ed);
+    addBookmark(ed, "x", 0, 0);
+    addBookmark(ed, "y", 1, 0);
+    addBookmark(ed, "z", 2, 0);
+    ed.cursorLine = 3;
+    ed.cursorCol = 0;
+    savePreviousPosition(ed);
+
+    DynamicArray<Bookmark> out;
+    collectBookmarksInLines(ed, 1, 2, out);
+    CHECK(out.size() == 2);
+    Bookmark b;
+    out.get(0, b);
+    CHECK(b.name == "y");
+    out.get(1, b);
+    CHECK(b.name == "z");
+}
+
+// collectBookmarksInLines accepts the hidden slot if its line is in range.
+void test_collect_includes_hidden_when_in_range()
+{
+    const std::string lines[] = {"a", "b"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
+    ed.cursorLine = 1;
+    ed.cursorCol = 0;
+    savePreviousPosition(ed);
+
+    DynamicArray<Bookmark> out;
+    collectBookmarksInLines(ed, 1, 1, out);
+    CHECK(out.size() == 1);
+    Bookmark b;
+    out.get(0, b);
+    CHECK(b.name == "__previous");
+}
+
+// restoreBookmarks adds bookmarks that don't exist yet.
+void test_restore_adds_new_bookmarks()
+{
+    const std::string lines[] = {"hello", "world"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
+
+    DynamicArray<Bookmark> saved;
+    Bookmark b1;
+    b1.name = "a";
+    b1.line = 0;
+    b1.col = 1;
+    saved.pushBack(b1);
+    Bookmark b2;
+    b2.name = "b";
+    b2.line = 1;
+    b2.col = 2;
+    saved.pushBack(b2);
+
+    restoreBookmarks(ed, saved);
+    CHECK(findBookmark(ed, "a") != -1);
+    CHECK(findBookmark(ed, "b") != -1);
+}
+
+// restoreBookmarks skips duplicates (existing names).
+void test_restore_skips_duplicates()
+{
+    const std::string lines[] = {"hello", "world"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
+    addBookmark(ed, "existing", 0, 0);
+
+    DynamicArray<Bookmark> saved;
+    Bookmark dup;
+    dup.name = "existing";
+    dup.line = 1;
+    dup.col = 2;
+    saved.pushBack(dup);
+    Bookmark fresh;
+    fresh.name = "fresh";
+    fresh.line = 1;
+    fresh.col = 1;
+    saved.pushBack(fresh);
+
+    restoreBookmarks(ed, saved);
+    CHECK(findBookmark(ed, "existing") == 0); // unchanged
+    Bookmark b;
+    CHECK(ed.bookmarks.get(0, b) && b.line == 0 && b.col == 0); // original position
+    CHECK(findBookmark(ed, "fresh") != -1);
+}
+
+// restoreBookmarks skips bookmarks whose line no longer exists.
+void test_restore_skips_invalid_line()
+{
+    const std::string lines[] = {"only"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+
+    DynamicArray<Bookmark> saved;
+    Bookmark bad;
+    bad.name = "bad";
+    bad.line = 5;
+    bad.col = 0;
+    saved.pushBack(bad);
+    Bookmark ok;
+    ok.name = "ok";
+    ok.line = 0;
+    ok.col = 1;
+    saved.pushBack(ok);
+
+    restoreBookmarks(ed, saved);
+    CHECK(findBookmark(ed, "bad") == -1);
+    CHECK(findBookmark(ed, "ok") != -1);
+}
+
+// restoreBookmarks clamps col to line length.
+void test_restore_clamps_col()
+{
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+
+    DynamicArray<Bookmark> saved;
+    Bookmark b;
+    b.name = "long";
+    b.line = 0;
+    b.col = 99;
+    saved.pushBack(b);
+
+    restoreBookmarks(ed, saved);
+    int idx = findBookmark(ed, "long");
+    CHECK(idx != -1);
+    Bookmark got;
+    CHECK(ed.bookmarks.get(idx, got) && got.col == 3);
+}
+
+// restoreBookmarks can restore the hidden "__previous" slot (bypasses addBookmark).
+void test_restore_accepts_hidden_name()
+{
+    const std::string lines[] = {"abc"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+
+    DynamicArray<Bookmark> saved;
+    Bookmark b;
+    b.name = "__previous";
+    b.line = 0;
+    b.col = 1;
+    saved.pushBack(b);
+
+    restoreBookmarks(ed, saved);
+    CHECK(findBookmark(ed, "__previous") != -1);
+}
 
 int main()
 {
@@ -644,6 +901,21 @@ int main()
     test_adjust_delete_several_in_one_pass();
     test_adjust_delete_negative_ignored();
     test_adjust_delete_below_all();
+
+    test_split_then_join_is_identity();
+    test_split_bookmark_exactly_at_split_col();
+    test_split_bookmark_before_col();
+    test_split_bookmark_at_line_end();
+    test_join_bookmark_on_second_half();
+    test_join_bookmark_below();
+    test_split_handles_hidden_previous();
+    test_collect_bookmarks_in_lines();
+    test_collect_includes_hidden_when_in_range();
+    test_restore_adds_new_bookmarks();
+    test_restore_skips_duplicates();
+    test_restore_skips_invalid_line();
+    test_restore_clamps_col();
+    test_restore_accepts_hidden_name();
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;

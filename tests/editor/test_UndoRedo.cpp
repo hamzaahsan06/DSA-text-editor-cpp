@@ -1,584 +1,332 @@
-// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_UndoRedo.cpp src/editor/UndoRedo.cpp -o build/test_UndoRedo ; if ($?) { ./build/test_UndoRedo }
+// g++ -std=c++11 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_UndoRedo.cpp src/editor/UndoRedo.cpp src/editor/Bookmarks.cpp src/editor/Formatting.cpp -o build/test_UndoRedo ; if ($?) { ./build/test_UndoRedo }
 
 #include <iostream>
 #include <string>
 #include "editor/UndoRedo.h"
+#include "editor/Bookmarks.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
+#include "editor/Formatting.h"
 #include "../ds/check.h"
 
-// Resets `ed` to a fresh editor with one empty line.
-// Editor is non-copyable, so we build it in place via a reference out-parameter.
-static void makeEditor(Editor& ed)
+static void makeEditorWith(const std::string *lines, int n, Editor &ed)
 {
     ed.reset();
+    if (n <= 0)
+        return;
+    Line *first = ed.getLine(0);
+    if (first != nullptr)
+        first->text = lines[0];
+    for (int i = 1; i < n; ++i)
+    {
+        Line l;
+        l.text = lines[i];
+        ed.document.insertAtTail(l);
+    }
 }
 
-// ---------- record / recordInsert / recordErase / recordReplace ----------
-
-// Checks record() accepts a valid command and puts it on undoStack.
-void test_record_valid_command()
+// Line edit undo/redo restores text and formats.
+void test_line_edit_restores_formats_and_cursor()
 {
-    Editor ed; makeEditor(ed);
+    const std::string lines[] = {"hello"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     UndoRedo ur;
-    Command c;
-    c.type = INSERT_TEXT;
-    c.line = 0;
-    c.col = 0;
-    c.newText = "hi";
-    CHECK(ur.record(ed, c) == true);
-    CHECK(ed.undoStack.size() == 1);
-    CHECK(ed.redoStack.isEmpty());
-}
 
-// Checks record() rejects negative line or column.
-void test_record_rejects_bad_position()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    Command c;
-    c.type = INSERT_TEXT;
-    c.line = -1;
-    c.col = 0;
-    CHECK(ur.record(ed, c) == false);
-    c.line = 0;
-    c.col = -1;
-    CHECK(ur.record(ed, c) == false);
-    CHECK(ed.undoStack.isEmpty());
-}
+    Line before;
+    before.text = "hello";
+    FormatSpan fs;
+    fs.startCol = 0;
+    fs.endCol = 5;
+    fs.type = BOLD;
+    before.formats.pushBack(fs);
 
-// Checks record() rejects a line index that does not exist.
-void test_record_rejects_missing_line()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    Command c;
-    c.type = INSERT_TEXT;
-    c.line = 99;
-    c.col = 0;
-    c.newText = "x";
-    CHECK(ur.record(ed, c) == false);
-    CHECK(ed.undoStack.isEmpty());
-}
+    Position cb;
+    cb.line = 0;
+    cb.col = 2;
 
-// Checks record() clears redoStack on a new command.
-void test_record_clears_redo_stack()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    Command c;
-    c.type = INSERT_TEXT;
-    c.line = 0;
-    c.col = 0;
-    c.newText = "a";
-    ur.record(ed, c);
-    ed.redoStack.push(c);
-    CHECK(ed.redoStack.size() == 1);
-    ur.record(ed, c);
-    CHECK(ed.redoStack.isEmpty());
-    CHECK(ed.undoStack.size() == 2);
-}
-
-// Checks recordInsert stores line, col and text correctly.
-void test_record_insert_builds_command()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.recordInsert(ed, 0, 3, "abc") == true);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == INSERT_TEXT);
-    CHECK(c.line == 0);
-    CHECK(c.col == 3);
-    CHECK(c.oldText == "");
-    CHECK(c.newText == "abc");
-}
-
-// Checks recordErase stores erasedText in oldText and empty newText.
-void test_record_erase_builds_command()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.recordErase(ed, 0, 2, "xy") == true);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == DELETE_TEXT);
-    CHECK(c.line == 0);
-    CHECK(c.col == 2);
-    CHECK(c.oldText == "xy");
-    CHECK(c.newText == "");
-}
-
-// Checks recordReplace stores old and new text with line/col.
-void test_record_replace_builds_command()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.recordReplace(ed, 0, 5, "old", "new") == true);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == REPLACE);
-    CHECK(c.line == 0);
-    CHECK(c.col == 5);
-    CHECK(c.oldText == "old");
-    CHECK(c.newText == "new");
-}
-
-// ---------- recordInsertLine / recordDeleteLine ----------
-
-// Checks recordInsertLine accepts line == getLineCount() (append at end).
-void test_record_insert_line_at_end()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    int end = ed.getLineCount();
-    CHECK(ur.recordInsertLine(ed, end, "appended") == true);
-    CHECK(ed.undoStack.size() == 1);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == INSERT_LINE);
-    CHECK(c.line == end);
-    CHECK(c.newText == "appended");
-}
-
-// Checks recordInsertLine rejects negative or out-of-range line.
-void test_record_insert_line_rejects_bad_index()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.recordInsertLine(ed, -1, "x") == false);
-    CHECK(ur.recordInsertLine(ed, ed.getLineCount() + 1, "x") == false);
-    CHECK(ed.undoStack.isEmpty());
-}
-
-// Checks recordDeleteLine accepts a valid line and rejects bad indexes.
-void test_record_delete_line_valid_and_bad()
-{
-    Editor ed; makeEditor(ed);
-    Line a; a.text = "alpha";
-    ed.document.insertAtTail(a);   // now ["", "alpha"], 2 lines
-    UndoRedo ur;
-    CHECK(ur.recordDeleteLine(ed, 0, "") == true);         // line 0 valid
-    CHECK(ur.recordDeleteLine(ed, 1, "alpha") == true);    // line 1 valid
-    CHECK(ed.undoStack.size() == 2);
-    CHECK(ur.recordDeleteLine(ed, -1, "x") == false);
-    CHECK(ur.recordDeleteLine(ed, 2, "x") == false);       // out of range (count 2)
-    CHECK(ed.undoStack.size() == 2);
-}
-
-// ---------- undo of text ops ----------
-
-// Checks undo on empty history returns false.
-void test_undo_empty_history()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.undo(ed) == false);
-    CHECK(ed.undoStack.isEmpty());
-    CHECK(ed.redoStack.isEmpty());
-}
-
-// Checks undo of INSERT_TEXT removes the inserted text.
-void test_undo_insert_text()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "hello";                         // simulate the edit
-    UndoRedo ur;
-    ur.recordInsert(ed, 0, 0, "hello");
-    CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "");
-    CHECK(ed.undoStack.isEmpty());
-    CHECK(ed.redoStack.size() == 1);
-}
-
-// Checks undo of DELETE_TEXT re-inserts the erased text.
-void test_undo_delete_text()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "abc";                           // simulate "abcde" -> erased "de"
-    UndoRedo ur;
-    ur.recordErase(ed, 0, 3, "de");
-    CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "abcde");
-    CHECK(ed.undoStack.isEmpty());
-    CHECK(ed.redoStack.size() == 1);
-}
-
-// Checks undo of REPLACE restores oldText.
-void test_undo_replace()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "new";                           // simulate "old" -> "new"
-    UndoRedo ur;
-    ur.recordReplace(ed, 0, 0, "old", "new");
-    CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "old");
-}
-
-// Checks undo refuses out-of-range column and preserves history.
-void test_undo_out_of_range_col()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "abc";
-    UndoRedo ur;
-    ur.recordInsert(ed, 0, 2, "xy");           // would erase 2 chars at col 2, but only 1 there
-    CHECK(ur.undo(ed) == false);
-    CHECK(l->text == "abc");
-    CHECK(ed.undoStack.size() == 1);
-}
-
-// Checks multi-line undo targets the correct line.
-void test_undo_multi_line()
-{
-    Editor ed; makeEditor(ed);
-    Line* first = ed.getLine(0);
-    first->text = "first";
-    Line l2; l2.text = "second";
-    Line l3; l3.text = "third";
-    ed.document.insertAtTail(l2);
-    ed.document.insertAtTail(l3);              // ["first", "second", "third"]
-
-    UndoRedo ur;
-    ur.recordReplace(ed, 2, 0, "third", "THIRD");
-    Line* target = ed.getLine(2);
-    target->text = "THIRD";                    // simulate the edit
-
-    CHECK(ur.undo(ed) == true);
-    Line* l = ed.getLine(2);
-    CHECK(l != nullptr);
-    CHECK(l->text == "third");
-    CHECK(ed.getLine(0)->text == "first");
-    CHECK(ed.getLine(1)->text == "second");
-}
-
-// Checks undo sets the modified flag.
-void test_undo_sets_modified()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "x";
-    ed.setModified(false);
-    UndoRedo ur;
-    ur.recordInsert(ed, 0, 0, "x");
-    CHECK(ur.undo(ed) == true);
-    CHECK(ed.isModified() == true);
-}
-
-// ---------- undo of line ops ----------
-
-// Checks undo of INSERT_LINE removes that line.
-void test_undo_insert_line()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    ur.recordInsertLine(ed, 1, "added");       // record BEFORE mutating
-    Line extra; extra.text = "added";
-    ed.document.insertAtTail(extra);           // then apply -> ["", "added"]
-
-    CHECK(ur.undo(ed) == true);
-    CHECK(ed.getLineCount() == 1);
-    CHECK(ed.getLine(1) == nullptr);
-    CHECK(ed.getLine(0)->text == "");
-}
-
-// Checks undo of DELETE_LINE restores a single removed line.
-void test_undo_delete_line_single()
-{
-    Editor ed; makeEditor(ed);
-    Line a; a.text = "alpha";
-    Line b; b.text = "beta";
-    ed.document.insertAtTail(a);
-    ed.document.insertAtTail(b);               // ["", "alpha", "beta"]
-
-    UndoRedo ur;
-    ur.recordDeleteLine(ed, 1, "alpha");       // record FIRST (line 1 exists)
-    Line removed;
-    ed.document.removeAtPosition(1, removed);  // then mutate -> ["", "beta"]
-
-    CHECK(ur.undo(ed) == true);
-    CHECK(ed.getLineCount() == 3);
-    CHECK(ed.getLine(1)->text == "alpha");
-    CHECK(ed.getLine(2)->text == "beta");
-}
-
-// Checks undo of DELETE_LINE restores a multi-line blob.
-void test_undo_delete_line_multi_blob()
-{
-    Editor ed; makeEditor(ed);
-    Line a; a.text = "one";
-    Line b; b.text = "two";
-    Line c; c.text = "three";
-    ed.document.insertAtTail(a);
-    ed.document.insertAtTail(b);
-    ed.document.insertAtTail(c);               // ["", "one", "two", "three"]
-
-    UndoRedo ur;
-    ur.recordDeleteLine(ed, 1, "one\ntwo");    // record FIRST
-
-    Line tmp;
-    ed.document.removeAtPosition(1, tmp);
-    ed.document.removeAtPosition(1, tmp);      // then mutate -> ["", "three"]
-
-    CHECK(ur.undo(ed) == true);
-    CHECK(ed.getLineCount() == 4);
-    CHECK(ed.getLine(0)->text == "");
-    CHECK(ed.getLine(1)->text == "one");
-    CHECK(ed.getLine(2)->text == "two");
-    CHECK(ed.getLine(3)->text == "three");
-}
-
-// ---------- redo ----------
-
-// Checks redo on empty history returns false.
-void test_redo_empty_history()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.redo(ed) == false);
-}
-
-// Checks undo then redo of INSERT_TEXT round-trips.
-void test_redo_insert_after_undo()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
+    // Edit in place
+    Line *l = ed.getLine(0);
     l->text = "world";
-    UndoRedo ur;
-    ur.recordInsert(ed, 0, 0, "world");
+    clearFormats(*l);
+    FormatSpan fs2;
+    fs2.startCol = 1;
+    fs2.endCol = 4;
+    fs2.type = ITALIC;
+    l->formats.pushBack(fs2);
+    ed.cursorLine = 0;
+    ed.cursorCol = 4;
+
+    CHECK(ur.recordLineEdit(ed, INSERT_TEXT, 0, before, cb) == true);
+
+    // Undo
     CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "");
+    CHECK(ed.getLine(0)->text == "hello");
+    CHECK(ed.getLine(0)->formats.size() == 1);
+    FormatSpan out;
+    ed.getLine(0)->formats.get(0, out);
+    CHECK(out.type == BOLD && out.startCol == 0 && out.endCol == 5);
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 2);
+
+    // Redo
     CHECK(ur.redo(ed) == true);
-    CHECK(l->text == "world");
-    CHECK(ed.undoStack.size() == 1);
-    CHECK(ed.redoStack.isEmpty());
+    CHECK(ed.getLine(0)->text == "world");
+    CHECK(ed.getLine(0)->formats.size() == 1);
+    ed.getLine(0)->formats.get(0, out);
+    CHECK(out.type == ITALIC && out.startCol == 1 && out.endCol == 4);
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 4);
 }
 
-// Checks undo then redo of DELETE_TEXT round-trips.
-void test_redo_delete_after_undo()
+// Split undo/redo with formats, cursor, and bookmark.
+void test_split_undo_redo_with_bookmark()
 {
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "abc";
+    const std::string lines[] = {"hello world"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     UndoRedo ur;
-    ur.recordErase(ed, 0, 3, "de");
-    CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "abcde");
-    CHECK(ur.redo(ed) == true);
-    CHECK(l->text == "abc");
-}
 
-// Checks undo then redo of REPLACE round-trips.
-void test_redo_replace_after_undo()
-{
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "new";
-    UndoRedo ur;
-    ur.recordReplace(ed, 0, 0, "old", "new");
-    CHECK(ur.undo(ed) == true);
-    CHECK(l->text == "old");
-    CHECK(ur.redo(ed) == true);
-    CHECK(l->text == "new");
-}
+    addBookmark(ed, "mark", 0, 8); // points to 'r'
+    Position cb;
+    cb.line = 0;
+    cb.col = 5;
 
-// Checks undo then redo of INSERT_LINE round-trips.
-void test_redo_insert_line()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    ur.recordInsertLine(ed, 1, "extra");       // record FIRST
-    Line extra; extra.text = "extra";
-    ed.document.insertAtTail(extra);           // then apply
+    Line before;
+    before.text = "hello world";
+    FormatSpan fs;
+    fs.startCol = 0;
+    fs.endCol = 11;
+    fs.type = BOLD;
+    before.formats.pushBack(fs);
 
+    // Perform Split
+    ed.document.insertAtTail(Line());
+    ed.getLine(0)->text = "hello ";
+    ed.getLine(1)->text = "world";
+
+    ed.cursorLine = 1;
+    ed.cursorCol = 0;
+
+    CHECK(ur.recordSplit(ed, 0, 6, before, cb) == true);
+
+    // Undo
     CHECK(ur.undo(ed) == true);
     CHECK(ed.getLineCount() == 1);
+    CHECK(ed.getLine(0)->text == "hello world");
+    CHECK(findBookmark(ed, "mark") == 0);
+    Bookmark b;
+    ed.bookmarks.get(0, b);
+    CHECK(b.line == 0 && b.col == 8);
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 5);
+
+    // Redo
     CHECK(ur.redo(ed) == true);
     CHECK(ed.getLineCount() == 2);
-    CHECK(ed.getLine(1)->text == "extra");
+    CHECK(ed.getLine(0)->text == "hello ");
+    CHECK(ed.getLine(1)->text == "world");
+    CHECK(findBookmark(ed, "mark") == 0);
+    ed.bookmarks.get(0, b);
+    CHECK(b.line == 1 && b.col == 2); // moved to line 1, col 8-6
+    CHECK(ed.cursorLine == 1 && ed.cursorCol == 0);
 }
 
-// Checks undo then redo of a single-line DELETE_LINE round-trips.
-void test_redo_delete_line_single()
+// Delete lines undo/redo (single and range).
+void test_delete_lines_undo_redo()
 {
-    Editor ed; makeEditor(ed);
-    Line a; a.text = "alpha";
-    ed.document.insertAtTail(a);               // ["", "alpha"]
-
+    const std::string lines[] = {"one", "two", "three", "four"};
+    Editor ed;
+    makeEditorWith(lines, 4, ed);
     UndoRedo ur;
-    ur.recordDeleteLine(ed, 1, "alpha");       // record FIRST (line 1 exists)
-    Line removed;
-    ed.document.removeAtPosition(1, removed);  // then mutate -> [""]
 
+    addBookmark(ed, "b_two", 1, 0);
+    addBookmark(ed, "b_three", 2, 0);
+    addBookmark(ed, "b_four", 3, 0);
+
+    DynamicArray<Line> deleted;
+    deleted.pushBack(*ed.getLine(1));
+    deleted.pushBack(*ed.getLine(2));
+
+    DynamicArray<Bookmark> removed;
+    removed.pushBack(ed.bookmarks[0]); // b_two
+    removed.pushBack(ed.bookmarks[1]); // b_three
+
+    Position cb;
+    cb.line = 0;
+    cb.col = 0;
+
+    // Perform delete
+    Line dummy;
+    ed.document.removeAtPosition(1, dummy);
+    ed.document.removeAtPosition(1, dummy);
+    adjustBookmarksOnLineDelete(ed, 1);
+    adjustBookmarksOnLineDelete(ed, 1);
+    ed.cursorLine = 1;
+    ed.cursorCol = 0;
+
+    CHECK(ur.recordDeleteLines(ed, 1, deleted, removed, cb) == true);
+
+    // Undo
+    CHECK(ur.undo(ed) == true);
+    CHECK(ed.getLineCount() == 4);
+    CHECK(ed.getLine(1)->text == "two");
+    CHECK(ed.getLine(2)->text == "three");
+    CHECK(findBookmark(ed, "b_two") != -1);
+    CHECK(findBookmark(ed, "b_three") != -1);
+    Bookmark b;
+    ed.bookmarks.get(findBookmark(ed, "b_four"), b);
+    CHECK(b.line == 3); // shifted back
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 0);
+
+    // Redo
+    CHECK(ur.redo(ed) == true);
+    CHECK(ed.getLineCount() == 2);
+    CHECK(findBookmark(ed, "b_two") == -1);
+    ed.bookmarks.get(findBookmark(ed, "b_four"), b);
+    CHECK(b.line == 1); // shifted up
+    CHECK(ed.cursorLine == 1 && ed.cursorCol == 0);
+}
+
+// Delete all lines.
+void test_delete_all_lines()
+{
+    const std::string lines[] = {"a", "b"};
+    Editor ed;
+    makeEditorWith(lines, 2, ed);
+    UndoRedo ur;
+
+    DynamicArray<Line> deleted;
+    deleted.pushBack(*ed.getLine(0));
+    deleted.pushBack(*ed.getLine(1));
+
+    DynamicArray<Bookmark> removed;
+
+    Position cb;
+    cb.line = 0;
+    cb.col = 0;
+
+    ed.document.clear();
+    ed.cursorLine = 0;
+    ed.cursorCol = 0;
+
+    CHECK(ur.recordDeleteLines(ed, 0, deleted, removed, cb) == true);
     CHECK(ur.undo(ed) == true);
     CHECK(ed.getLineCount() == 2);
-    CHECK(ed.getLine(1)->text == "alpha");
+    CHECK(ed.getLine(0)->text == "a");
     CHECK(ur.redo(ed) == true);
-    CHECK(ed.getLineCount() == 1);
-    CHECK(ed.getLine(1) == nullptr);
+    CHECK(ed.getLineCount() == 0);
 }
 
-// Checks undo then redo of a multi-line DELETE_LINE round-trips.
-void test_redo_delete_line_multi()
+// recordBlockEdit with different sizes (e.g. Replace All).
+void test_block_edit_different_sizes()
 {
-    Editor ed; makeEditor(ed);
-    Line a; a.text = "one";
-    Line b; b.text = "two";
-    Line c; c.text = "three";
-    ed.document.insertAtTail(a);
-    ed.document.insertAtTail(b);
-    ed.document.insertAtTail(c);               // ["", "one", "two", "three"]
-
+    const std::string lines[] = {"a", "b", "c", "d"};
+    Editor ed;
+    makeEditorWith(lines, 4, ed);
     UndoRedo ur;
-    ur.recordDeleteLine(ed, 1, "one\ntwo");    // record FIRST
 
-    Line tmp;
-    ed.document.removeAtPosition(1, tmp);
-    ed.document.removeAtPosition(1, tmp);      // then mutate -> ["", "three"]
+    DynamicArray<Line> before;
+    before.pushBack(*ed.getLine(1)); // "b"
+    before.pushBack(*ed.getLine(2)); // "c"
+
+    // Replace 2 lines with 3 lines
+    Line dummy;
+    ed.document.removeAtPosition(1, dummy);
+    ed.document.removeAtPosition(1, dummy);
+    Line n1;
+    n1.text = "x";
+    ed.document.insertAtPosition(1, n1);
+    Line n2;
+    n2.text = "y";
+    ed.document.insertAtPosition(2, n2);
+    Line n3;
+    n3.text = "z";
+    ed.document.insertAtPosition(3, n3);
+
+    Position cb;
+    cb.line = 0;
+    cb.col = 0;
+    CHECK(ur.recordBlockEdit(ed, REPLACE_ALL, 1, before, 3, cb) == true);
 
     CHECK(ur.undo(ed) == true);
     CHECK(ed.getLineCount() == 4);
-    CHECK(ed.getLine(1)->text == "one");
-    CHECK(ed.getLine(2)->text == "two");
+    CHECK(ed.getLine(1)->text == "b");
+    CHECK(ed.getLine(2)->text == "c");
 
     CHECK(ur.redo(ed) == true);
-    CHECK(ed.getLineCount() == 2);
-    CHECK(ed.getLine(1)->text == "three");
+    CHECK(ed.getLineCount() == 5);
+    CHECK(ed.getLine(1)->text == "x");
+    CHECK(ed.getLine(3)->text == "z");
 }
 
-// Checks redo sets the modified flag.
-void test_redo_sets_modified()
+// New record clears redo.
+void test_new_record_clears_redo()
 {
-    Editor ed; makeEditor(ed);
-    Line* l = ed.getLine(0);
-    l->text = "x";
+    Editor ed;
     UndoRedo ur;
-    ur.recordInsert(ed, 0, 0, "x");
-    ur.undo(ed);
-    ed.setModified(false);
-    CHECK(ur.redo(ed) == true);
-    CHECK(ed.isModified() == true);
-}
+    Line before;
 
-// ---------- canUndo / canRedo / clearHistory ----------
+    CHECK(ur.undo(ed) == false);
+    CHECK(ur.redo(ed) == false);
 
-// Checks canUndo / canRedo reflect stack state after a real insert.
-void test_can_undo_can_redo()
-{
-    Editor ed; makeEditor(ed);
-    UndoRedo ur;
-    CHECK(ur.canUndo(ed) == false);
-    CHECK(ur.canRedo(ed) == false);
-
-    ur.recordInsert(ed, 0, 0, "x");
-    Line* l = ed.getLine(0);
-    l->text = "x";                             // simulate the edit
-    CHECK(ur.canUndo(ed) == true);
-    CHECK(ur.canRedo(ed) == false);
-
+    ur.recordLineEdit(ed, INSERT_TEXT, 0, before, Position());
     CHECK(ur.undo(ed) == true);
-    CHECK(ur.canUndo(ed) == false);
     CHECK(ur.canRedo(ed) == true);
 
-    CHECK(ur.redo(ed) == true);
-    CHECK(ur.canUndo(ed) == true);
+    ur.recordLineEdit(ed, INSERT_TEXT, 0, before, Position());
     CHECK(ur.canRedo(ed) == false);
 }
 
-// Checks clearHistory empties both stacks.
-void test_clear_history()
+// Invalid arguments.
+void test_invalid_arguments()
 {
-    Editor ed; makeEditor(ed);
+    Editor ed;
     UndoRedo ur;
-    Line* l = ed.getLine(0);
+    Line before;
+    DynamicArray<Line> block;
+    DynamicArray<Bookmark> bms;
+    Position p;
 
-    ur.recordInsert(ed, 0, 0, "a");
-    l->text = "a";
-    CHECK(ur.undo(ed) == true);
-
-    ur.recordInsert(ed, 0, 0, "b");
-    l->text = "b";
-    CHECK(ur.undo(ed) == true);
-
-    CHECK(ed.undoStack.isEmpty() == true);
-    CHECK(ed.redoStack.isEmpty() == false);
-
-    ur.clearHistory(ed);
-    CHECK(ed.undoStack.isEmpty());
-    CHECK(ed.redoStack.isEmpty());
+    CHECK(ur.recordLineEdit(ed, INSERT_TEXT, 99, before, p) == false);
+    CHECK(ur.recordSplit(ed, 0, 2, before, p) == false); // 0+1 doesn't exist
+    CHECK(ur.recordBlockEdit(ed, REPLACE_ALL, 0, block, -1, p) == false);
+    CHECK(ur.recordBlockEdit(ed, REPLACE_ALL, 0, block, 5, p) == false);
 }
 
-// ---------- FORMAT ops are refused ----------
-
-// Checks FORMAT_APPLY and FORMAT_REMOVE are refused (stacks untouched).
-void test_format_ops_refused()
+// 30 cycles of edit/undo/redo remain identical.
+void test_30_cycles()
 {
-    Editor ed; makeEditor(ed);
+    const std::string lines[] = {"original"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
     UndoRedo ur;
 
-    Command fmtApply;
-    fmtApply.type = FORMAT_APPLY;
-    fmtApply.line = 0;
-    fmtApply.col = 0;
-    fmtApply.fmtStart = 0;
-    fmtApply.fmtEnd = 1;
-    fmtApply.fmtType = BOLD;
-    CHECK(ur.record(ed, fmtApply) == true);    // record accepts it
-    CHECK(ur.undo(ed) == false);               // but undo refuses
-    CHECK(ed.undoStack.size() == 1);           // command stays
+    for (int i = 0; i < 30; ++i)
+    {
+        Line before = *ed.getLine(0);
+        ed.getLine(0)->text = "edited";
+        ur.recordLineEdit(ed, INSERT_TEXT, 0, before, Position());
 
-    Command fmtRemove;
-    fmtRemove.type = FORMAT_REMOVE;
-    fmtRemove.line = 0;
-    fmtRemove.col = 0;
-    fmtRemove.fmtStart = 0;
-    fmtRemove.fmtEnd = 1;
-    fmtRemove.fmtType = ITALIC;
-    CHECK(ur.record(ed, fmtRemove) == true);
-    CHECK(ur.undo(ed) == false);
-    CHECK(ed.undoStack.size() == 2);
+        CHECK(ur.undo(ed) == true);
+        CHECK(ed.getLine(0)->text == "original");
+
+        CHECK(ur.redo(ed) == true);
+        CHECK(ed.getLine(0)->text == "edited");
+
+        // Reset back to original manually for the next cycle
+        ed.getLine(0)->text = "original";
+        ur.clearHistory(ed);
+    }
 }
 
 int main()
 {
-    test_record_valid_command();
-    test_record_rejects_bad_position();
-    test_record_rejects_missing_line();
-    test_record_clears_redo_stack();
-    test_record_insert_builds_command();
-    test_record_erase_builds_command();
-    test_record_replace_builds_command();
-
-    test_record_insert_line_at_end();
-    test_record_insert_line_rejects_bad_index();
-    test_record_delete_line_valid_and_bad();
-
-    test_undo_empty_history();
-    test_undo_insert_text();
-    test_undo_delete_text();
-    test_undo_replace();
-    test_undo_out_of_range_col();
-    test_undo_multi_line();
-    test_undo_sets_modified();
-    test_undo_insert_line();
-    test_undo_delete_line_single();
-    test_undo_delete_line_multi_blob();
-
-    test_redo_empty_history();
-    test_redo_insert_after_undo();
-    test_redo_delete_after_undo();
-    test_redo_replace_after_undo();
-    test_redo_insert_line();
-    test_redo_delete_line_single();
-    test_redo_delete_line_multi();
-    test_redo_sets_modified();
-
-    test_can_undo_can_redo();
-    test_clear_history();
-    test_format_ops_refused();
+    test_line_edit_restores_formats_and_cursor();
+    test_split_undo_redo_with_bookmark();
+    test_delete_lines_undo_redo();
+    test_delete_all_lines();
+    test_block_edit_different_sizes();
+    test_new_record_clears_redo();
+    test_invalid_arguments();
+    test_30_cycles();
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;

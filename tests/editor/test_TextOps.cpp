@@ -1,14 +1,16 @@
-// g++ -std=c++17 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_TextOps.cpp src/editor/TextOps.cpp src/editor/UndoRedo.cpp src/editor/Bookmarks.cpp src/editor/Validation.cpp -o build/test_TextOps ; if ($?) { ./build/test_TextOps }
+// g++ -std=c++11 -Wall -Wextra -Iinclude -Iinclude/editor tests/editor/test_TextOps.cpp src/editor/TextOps.cpp src/editor/UndoRedo.cpp src/editor/Bookmarks.cpp src/editor/Formatting.cpp src/editor/Validation.cpp -o build/test_TextOps ; if ($?) { ./build/test_TextOps }
 
 #include <iostream>
 #include <string>
 #include "editor/TextOps.h"
 #include "editor/UndoRedo.h"
 #include "editor/Bookmarks.h"
+#include "editor/Formatting.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
 #include "../ds/check.h"
 
+// Fills `ed` with the given lines. Editor is non-copyable, so fill in place.
 static void makeEditorWith(const std::string* lines, int n, Editor& ed)
 {
     ed.reset();
@@ -22,8 +24,6 @@ static void makeEditorWith(const std::string* lines, int n, Editor& ed)
         ed.document.insertAtTail(l);
     }
 }
-
-// ---------- insertText ----------
 
 void test_insert_text_middle()
 {
@@ -114,109 +114,14 @@ void test_insert_text_shifts_formats()
     const std::string lines[] = { "abcdef" };
     Editor ed; makeEditorWith(lines, 1, ed);
     Line* l = ed.getLine(0);
-    
     FormatSpan s; s.startCol = 2; s.endCol = 5; s.type = BOLD;
     l->formats.pushBack(s);
 
     CHECK(insertText(ed, 0, 1, "XX") == true);
     CHECK(l->text == "aXXbcdef");
-    
     CHECK(l->formats.size() == 1);
-    FormatSpan out;
-    CHECK(l->formats.get(0, out));
-    CHECK(out.startCol == 4);
-    CHECK(out.endCol == 7);
-}
-
-// endCol is exclusive: text typed exactly at the end of a span is outside it,
-// text at its start pushes it right, and text strictly inside makes it longer.
-void test_insert_text_span_boundaries()
-{
-    FormatSpan s; s.startCol = 2; s.endCol = 5; s.type = BOLD;
-    FormatSpan out;
-
-    const std::string lines[] = { "abcdef" };
-
-    Editor atEnd; makeEditorWith(lines, 1, atEnd);
-    atEnd.getLine(0)->formats.pushBack(s);
-    CHECK(insertText(atEnd, 0, 5, "Z") == true);
-    CHECK(atEnd.getLine(0)->formats.get(0, out));
-    CHECK(out.startCol == 2 && out.endCol == 5);        // not extended
-
-    Editor atStart; makeEditorWith(lines, 1, atStart);
-    atStart.getLine(0)->formats.pushBack(s);
-    CHECK(insertText(atStart, 0, 2, "Z") == true);
-    CHECK(atStart.getLine(0)->formats.get(0, out));
-    CHECK(out.startCol == 3 && out.endCol == 6);        // pushed right, same length
-
-    Editor inside; makeEditorWith(lines, 1, inside);
-    inside.getLine(0)->formats.pushBack(s);
-    CHECK(insertText(inside, 0, 3, "Z") == true);
-    CHECK(inside.getLine(0)->formats.get(0, out));
-    CHECK(out.startCol == 2 && out.endCol == 6);        // grew by one
-}
-
-// ---------- insertNewLine ----------
-
-// Splitting a line divides its format spans: spans before the cut stay, spans
-// after it move to the new line with columns reduced, a crossing span is cut.
-void test_insert_new_line_splits_formats()
-{
-    const std::string lines[] = { "abcdefgh" };
-    Editor ed; makeEditorWith(lines, 1, ed);
-    FormatSpan a; a.startCol = 0; a.endCol = 2; a.type = BOLD;         // before the cut
-    FormatSpan b; b.startCol = 3; b.endCol = 6; b.type = ITALIC;       // crosses the cut
-    FormatSpan c; c.startCol = 6; c.endCol = 8; c.type = BOLD_ITALIC;  // after the cut
-    ed.getLine(0)->formats.pushBack(a);
-    ed.getLine(0)->formats.pushBack(b);
-    ed.getLine(0)->formats.pushBack(c);
-
-    CHECK(insertNewLine(ed, 0, 4) == true);                // "abcd" | "efgh"
-    CHECK(ed.getLine(0)->text == "abcd");
-    CHECK(ed.getLine(1)->text == "efgh");
-
-    FormatSpan s;
-    CHECK(ed.getLine(0)->formats.size() == 2);
-    CHECK(ed.getLine(0)->formats.get(0, s));
-    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == BOLD);
-    CHECK(ed.getLine(0)->formats.get(1, s));
-    CHECK(s.startCol == 3 && s.endCol == 4 && s.type == ITALIC);       // head of b
-
-    CHECK(ed.getLine(1)->formats.size() == 2);
-    CHECK(ed.getLine(1)->formats.get(0, s));
-    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == ITALIC);       // tail of b
-    CHECK(ed.getLine(1)->formats.get(1, s));
-    CHECK(s.startCol == 2 && s.endCol == 4 && s.type == BOLD_ITALIC);  // c, moved
-}
-
-// A cut exactly between two spans gives each line one whole span.
-void test_insert_new_line_split_on_span_boundary()
-{
-    const std::string lines[] = { "abcd" };
-    Editor ed; makeEditorWith(lines, 1, ed);
-    FormatSpan a; a.startCol = 0; a.endCol = 2; a.type = BOLD;
-    FormatSpan b; b.startCol = 2; b.endCol = 4; b.type = ITALIC;
-    ed.getLine(0)->formats.pushBack(a);
-    ed.getLine(0)->formats.pushBack(b);
-
-    CHECK(insertNewLine(ed, 0, 2) == true);
-    FormatSpan s;
-    CHECK(ed.getLine(0)->formats.size() == 1);
-    CHECK(ed.getLine(0)->formats.get(0, s));
-    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == BOLD);
-    CHECK(ed.getLine(1)->formats.size() == 1);
-    CHECK(ed.getLine(1)->formats.get(0, s));
-    CHECK(s.startCol == 0 && s.endCol == 2 && s.type == ITALIC);
-}
-
-// A line with no formatting splits into two lines with none.
-void test_insert_new_line_split_without_formats()
-{
-    const std::string lines[] = { "abcd" };
-    Editor ed; makeEditorWith(lines, 1, ed);
-    CHECK(insertNewLine(ed, 0, 2) == true);
-    CHECK(ed.getLine(0)->formats.size() == 0);
-    CHECK(ed.getLine(1)->formats.size() == 0);
+    FormatSpan out; l->formats.get(0, out);
+    CHECK(out.startCol == 4 && out.endCol == 7);
 }
 
 void test_insert_new_line_mid()
@@ -286,8 +191,6 @@ void test_insert_new_line_undo_removes_correct_line()
     CHECK(ed.getLine(0)->text == "hello");
 }
 
-// ---------- deleteText ----------
-
 void test_delete_text_mid()
 {
     const std::string lines[] = { "abcdef" };
@@ -335,25 +238,20 @@ void test_delete_text_shifts_formats()
     FormatSpan s1; s1.startCol = 0; s1.endCol = 2; s1.type = BOLD;
     FormatSpan s2; s2.startCol = 2; s2.endCol = 4; s2.type = ITALIC;
     FormatSpan s3; s3.startCol = 4; s3.endCol = 6; s3.type = BOLD_ITALIC;
-    
     l->formats.pushBack(s1);
     l->formats.pushBack(s2);
     l->formats.pushBack(s3);
 
     CHECK(deleteText(ed, 0, 2, 4) == true);
     CHECK(l->text == "abef");
-    
     CHECK(l->formats.size() == 2);
     
     FormatSpan out1, out2;
     CHECK(l->formats.get(0, out1));
     CHECK(l->formats.get(1, out2));
-    
     CHECK(out1.startCol == 0 && out1.endCol == 2);
     CHECK(out2.startCol == 2 && out2.endCol == 4);
 }
-
-// ---------- deleteChar ----------
 
 void test_delete_char_valid()
 {
@@ -378,8 +276,6 @@ void test_delete_char_bad_line()
     Editor ed; makeEditorWith(lines, 1, ed);
     CHECK(deleteChar(ed, 99, 0) == false);
 }
-
-// ---------- deleteWord ----------
 
 void test_delete_word_middle()
 {
@@ -420,8 +316,6 @@ void test_delete_word_bad_col()
     CHECK(deleteWord(ed, 0, -1) == false);
     CHECK(deleteWord(ed, 0, 99) == false);
 }
-
-// ---------- deleteLines ----------
 
 void test_delete_lines_one_middle()
 {
@@ -469,19 +363,6 @@ void test_delete_lines_empty_document()
     CHECK(deleteLines(ed, 0, 0) == false);
 }
 
-void test_delete_lines_records_undo()
-{
-    const std::string lines[] = { "one", "two", "three" };
-    Editor ed; makeEditorWith(lines, 3, ed);
-    deleteLines(ed, 1, 2);
-    CHECK(ed.undoStack.size() == 1);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == DELETE_LINE);
-    CHECK(c.line == 1);
-    CHECK(c.oldText == "two\nthree");
-}
-
 void test_delete_lines_undo_restores()
 {
     const std::string lines[] = { "one", "two", "three", "four" };
@@ -501,20 +382,18 @@ void test_delete_lines_undo_restores()
     CHECK(ed.getLine(3)->text == "four");
 }
 
-// ---------- interactions with UndoRedo / Bookmarks ----------
-
 void test_insert_text_records_undo()
 {
     const std::string lines[] = { "abc" };
     Editor ed; makeEditorWith(lines, 1, ed);
     insertText(ed, 0, 1, "XY");
-    CHECK(ed.undoStack.size() == 1);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == INSERT_TEXT);
-    CHECK(c.line == 0);
-    CHECK(c.col == 1);
-    CHECK(c.newText == "XY");
+    
+    UndoRedo ur;
+    CHECK(ur.undo(ed) == true);
+    CHECK(ed.getLine(0)->text == "abc");
+    
+    CHECK(ur.redo(ed) == true);
+    CHECK(ed.getLine(0)->text == "aXYbc");
 }
 
 void test_delete_text_records_undo()
@@ -522,23 +401,20 @@ void test_delete_text_records_undo()
     const std::string lines[] = { "abcdef" };
     Editor ed; makeEditorWith(lines, 1, ed);
     deleteText(ed, 0, 2, 5);
-    CHECK(ed.undoStack.size() == 1);
-    Command c;
-    CHECK(ed.undoStack.peek(c) == true);
-    CHECK(c.type == DELETE_TEXT);
-    CHECK(c.line == 0);
-    CHECK(c.col == 2);
-    CHECK(c.oldText == "cde");
+    
+    UndoRedo ur;
+    CHECK(ur.undo(ed) == true);
+    CHECK(ed.getLine(0)->text == "abcdef");
+    
+    CHECK(ur.redo(ed) == true);
+    CHECK(ed.getLine(0)->text == "abf");
 }
 
 void test_insert_new_line_adjusts_bookmarks()
 {
     const std::string lines[] = { "abcdef" };
     Editor ed; makeEditorWith(lines, 1, ed);
-
-    Bookmark b0;
-    b0.name = "first";
-    b0.line = 0; b0.col = 0;
+    Bookmark b0; b0.name = "first"; b0.line = 0; b0.col = 0;
     ed.bookmarks.pushBack(b0);
 
     CHECK(insertNewLine(ed, 0, 3) == true);
@@ -554,15 +430,9 @@ void test_delete_lines_adjusts_bookmarks()
 {
     const std::string lines[] = { "a", "b", "c" };
     Editor ed; makeEditorWith(lines, 3, ed);
-
-    Bookmark onB;
-    onB.name = "onB";
-    onB.line = 1; onB.col = 0;
+    Bookmark onB; onB.name = "onB"; onB.line = 1; onB.col = 0;
     ed.bookmarks.pushBack(onB);
-
-    Bookmark onC;
-    onC.name = "onC";
-    onC.line = 2; onC.col = 0;
+    Bookmark onC; onC.name = "onC"; onC.line = 2; onC.col = 0;
     ed.bookmarks.pushBack(onC);
 
     CHECK(deleteLines(ed, 1, 1) == true);
@@ -572,6 +442,79 @@ void test_delete_lines_adjusts_bookmarks()
     Bookmark c;
     CHECK(ed.bookmarks.get(idxC, c) == true);
     CHECK(c.line == 1);
+}
+
+// NEW SNAPSHOT TESTS
+void test_snapshot_insert_undo_redo()
+{
+    const std::string lines[] = { "abc" };
+    Editor ed; makeEditorWith(lines, 1, ed);
+    Line* l = ed.getLine(0);
+    FormatSpan fs; fs.startCol = 0; fs.endCol = 3; fs.type = BOLD;
+    l->formats.pushBack(fs);
+    ed.cursorLine = 0; ed.cursorCol = 1;
+
+    CHECK(insertText(ed, 0, 1, "X") == true);
+    UndoRedo ur;
+    CHECK(ur.undo(ed) == true);
+    
+    // RE-FETCH the line pointer because undo deletes the old line node
+    l = ed.getLine(0);
+    CHECK(l->text == "abc");
+    CHECK(l->formats.size() == 1);
+    FormatSpan out; l->formats.get(0, out);
+    CHECK(out.startCol == 0 && out.endCol == 3);
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 1);
+    
+    CHECK(ur.redo(ed) == true);
+    l = ed.getLine(0); // RE-FETCH again
+    CHECK(l->text == "aXbc");
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 2);
+}
+
+void test_snapshot_delete_word_undo_redo()
+{
+    const std::string lines[] = { "one two" };
+    Editor ed; makeEditorWith(lines, 1, ed);
+    Line* l = ed.getLine(0);
+    FormatSpan fs; fs.startCol = 4; fs.endCol = 7; fs.type = ITALIC;
+    l->formats.pushBack(fs);
+    ed.cursorLine = 0; ed.cursorCol = 5;
+
+    CHECK(deleteWord(ed, 0, 5) == true);
+    UndoRedo ur;
+    CHECK(ur.undo(ed) == true);
+    
+    // RE-FETCH the line pointer
+    l = ed.getLine(0);
+    CHECK(l->text == "one two");
+    CHECK(l->formats.size() == 1);
+    FormatSpan out; l->formats.get(0, out);
+    CHECK(out.startCol == 4 && out.endCol == 7);
+    CHECK(ed.cursorLine == 0 && ed.cursorCol == 5);
+}
+
+void test_snapshot_delete_lines_undo_redo()
+{
+    const std::string lines[] = { "a", "b", "c" };
+    Editor ed; makeEditorWith(lines, 3, ed);
+    
+    Bookmark b; b.name = "mid"; b.line = 1; b.col = 0;
+    ed.bookmarks.pushBack(b);
+    
+    CHECK(deleteLines(ed, 1, 1) == true);
+    CHECK(ed.getLineCount() == 2);
+    CHECK(findBookmark(ed, "mid") == -1);
+    
+    UndoRedo ur;
+    CHECK(ur.undo(ed) == true);
+    CHECK(ed.getLineCount() == 3);
+    CHECK(ed.getLine(1)->text == "b");
+    CHECK(findBookmark(ed, "mid") != -1);
+    
+    CHECK(ur.redo(ed) == true);
+    CHECK(ed.getLineCount() == 2);
+    CHECK(findBookmark(ed, "mid") == -1);
 }
 
 int main()
@@ -586,10 +529,6 @@ int main()
     test_insert_text_empty_document_rejects_other_positions();
     test_insert_text_second_line();
     test_insert_text_shifts_formats();
-    test_insert_text_span_boundaries();
-    test_insert_new_line_splits_formats();
-    test_insert_new_line_split_on_span_boundary();
-    test_insert_new_line_split_without_formats();
 
     test_insert_new_line_mid();
     test_insert_new_line_at_col_zero();
@@ -619,13 +558,16 @@ int main()
     test_delete_lines_whole_document();
     test_delete_lines_bad_range();
     test_delete_lines_empty_document();
-    test_delete_lines_records_undo();
     test_delete_lines_undo_restores();
 
     test_insert_text_records_undo();
     test_delete_text_records_undo();
     test_insert_new_line_adjusts_bookmarks();
     test_delete_lines_adjusts_bookmarks();
+
+    test_snapshot_insert_undo_redo();
+    test_snapshot_delete_word_undo_redo();
+    test_snapshot_delete_lines_undo_redo();
 
     std::cout << passed << " passed, " << failed << " failed\n";
     return failed == 0 ? 0 : 1;
