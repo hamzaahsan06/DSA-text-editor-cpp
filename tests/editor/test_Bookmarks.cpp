@@ -6,21 +6,9 @@
 #include "editor/Bookmarks.h"
 #include "editor/Editor.h"
 #include "editor/Types.h"
+#include "../ds/check.h"
 
-static int passed = 0, failed = 0;
-#define CHECK(cond)                                                   \
-    do                                                                \
-    {                                                                 \
-        if (cond)                                                     \
-            ++passed;                                                 \
-        else                                                          \
-        {                                                             \
-            ++failed;                                                 \
-            std::cout << "FAIL line " << __LINE__ << ": " #cond "\n"; \
-        }                                                             \
-    } while (0)
-
-// Builds an editor with the given lines. Editor is non-copyable, so we fill in place.
+// Builds an editor with the given lines. Editor is non-copyable, so fill in place.
 static void makeEditorWith(const std::string *lines, int n, Editor &ed)
 {
     ed.reset();
@@ -45,11 +33,9 @@ void test_add_and_find_bookmark()
     const std::string lines[] = {"hello", "world"};
     Editor ed;
     makeEditorWith(lines, 2, ed);
-
     CHECK(addBookmark(ed, "start", 0, 0) == true);
     CHECK(getBookmarkCount(ed) == 1);
     CHECK(findBookmark(ed, "start") == 0);
-
     CHECK(addBookmark(ed, "end", 1, 5) == true);
     CHECK(getBookmarkCount(ed) == 2);
     CHECK(findBookmark(ed, "end") == 1);
@@ -65,17 +51,31 @@ void test_add_empty_name_rejected()
     CHECK(getBookmarkCount(ed) == 0);
 }
 
-// Rejects a name with leading or trailing whitespace.
-void test_add_name_with_surrounding_space_rejected()
+// Rejects a name containing whitespace anywhere (new strict rule).
+void test_add_whitespace_name_rejected()
 {
     const std::string lines[] = {"hello"};
     Editor ed;
     makeEditorWith(lines, 1, ed);
-    CHECK(addBookmark(ed, " start", 0, 0) == false);
-    CHECK(addBookmark(ed, "start ", 0, 0) == false);
-    CHECK(addBookmark(ed, "\tstart", 0, 0) == false);
-    CHECK(addBookmark(ed, "start\n", 0, 0) == false);
+    CHECK(addBookmark(ed, " start", 0, 0) == false);  // leading
+    CHECK(addBookmark(ed, "start ", 0, 0) == false);  // trailing
+    CHECK(addBookmark(ed, "mid dle", 0, 0) == false); // middle
+    CHECK(addBookmark(ed, "tab\there", 0, 0) == false);
+    CHECK(addBookmark(ed, "new\nline", 0, 0) == false);
+    CHECK(addBookmark(ed, "cr\rhere", 0, 0) == false);
     CHECK(getBookmarkCount(ed) == 0);
+}
+
+// Names with no whitespace (underscores, digits, punctuation) are accepted.
+void test_add_name_without_whitespace_accepted()
+{
+    const std::string lines[] = {"hello"};
+    Editor ed;
+    makeEditorWith(lines, 1, ed);
+    CHECK(addBookmark(ed, "start_point", 0, 0) == true);
+    CHECK(addBookmark(ed, "a1", 0, 0) == true);
+    CHECK(addBookmark(ed, "x.y-z", 0, 0) == true);
+    CHECK(getBookmarkCount(ed) == 3);
 }
 
 // Rejects a reserved "__" prefixed name.
@@ -86,6 +86,7 @@ void test_add_reserved_name_rejected()
     makeEditorWith(lines, 1, ed);
     CHECK(addBookmark(ed, "__previous", 0, 0) == false);
     CHECK(addBookmark(ed, "__internal", 0, 0) == false);
+    CHECK(addBookmark(ed, "__", 0, 0) == false);
     CHECK(getBookmarkCount(ed) == 0);
 }
 
@@ -98,7 +99,6 @@ void test_add_duplicate_name_rejected()
     CHECK(addBookmark(ed, "spot", 0, 0) == true);
     CHECK(addBookmark(ed, "spot", 0, 1) == false);
     CHECK(getBookmarkCount(ed) == 1);
-    // Original remains untouched.
     int idx = findBookmark(ed, "spot");
     CHECK(idx == 0);
     Bookmark b;
@@ -159,7 +159,7 @@ void test_add_at_cursor_rejects_bad_cursor()
     CHECK(getBookmarkCount(ed) == 0);
 }
 
-// ---------- removeBookmark / findBookmark ----------
+// ---------- findBookmark / removeBookmark ----------
 
 // findBookmark returns -1 when the name is unknown.
 void test_find_unknown_returns_minus_one()
@@ -171,7 +171,7 @@ void test_find_unknown_returns_minus_one()
     CHECK(findBookmark(ed, "") == -1);
 }
 
-// removeBookmark removes an existing bookmark.
+// removeBookmark removes an existing bookmark and preserves order.
 void test_remove_existing()
 {
     const std::string lines[] = {"a", "b", "c"};
@@ -184,7 +184,6 @@ void test_remove_existing()
     CHECK(removeBookmark(ed, "y") == true);
     CHECK(getBookmarkCount(ed) == 2);
     CHECK(findBookmark(ed, "y") == -1);
-    // Order of the survivors is preserved: x, z.
     CHECK(findBookmark(ed, "x") == 0);
     CHECK(findBookmark(ed, "z") == 1);
 }
@@ -221,16 +220,15 @@ void test_goto_clamps_col_when_line_shrank()
     const std::string lines[] = {"longline"};
     Editor ed;
     makeEditorWith(lines, 1, ed);
-    addBookmark(ed, "tip", 0, 7); // end of "longline"
-    // Simulate the line getting shorter without adjusting the bookmark.
+    addBookmark(ed, "tip", 0, 7);
     Line *l = ed.getLine(0);
-    l->text = "lo"; // length 2
+    l->text = "lo";
     CHECK(gotoBookmark(ed, "tip") == true);
     CHECK(ed.cursorLine == 0);
-    CHECK(ed.cursorCol == 2); // clamped to new length
+    CHECK(ed.cursorCol == 2);
 }
 
-// gotoBookmark returns false for an unknown name and leaves the cursor alone.
+// gotoBookmark returns false for unknown name and leaves cursor alone.
 void test_goto_unknown_leaves_cursor()
 {
     const std::string lines[] = {"abc"};
@@ -243,14 +241,13 @@ void test_goto_unknown_leaves_cursor()
     CHECK(ed.cursorCol == 1);
 }
 
-// gotoBookmark returns false if the saved line no longer exists.
+// gotoBookmark returns false when the saved line no longer exists.
 void test_goto_returns_false_when_line_gone()
 {
     const std::string lines[] = {"a", "b", "c"};
     Editor ed;
     makeEditorWith(lines, 3, ed);
     addBookmark(ed, "gone", 2, 0);
-    // Delete the line without adjusting the bookmark.
     Line dummy;
     ed.document.removeAtPosition(2, dummy);
     CHECK(gotoBookmark(ed, "gone") == false);
@@ -414,7 +411,7 @@ void test_list_shows_visible_only()
     addBookmark(ed, "mid", 1, 2);
     ed.cursorLine = 0;
     ed.cursorCol = 1;
-    savePreviousPosition(ed); // hidden, must not appear
+    savePreviousPosition(ed);
     std::ostringstream out;
     listBookmarks(ed, out);
     std::string s = out.str();
@@ -427,7 +424,7 @@ void test_list_shows_visible_only()
     CHECK(s.find("(Line 2, Column 3)") != std::string::npos);
 }
 
-// listBookmarks on a document with only a hidden bookmark prints "No bookmarks saved.".
+// listBookmarks on a doc with only a hidden bookmark prints the empty message.
 void test_list_only_hidden_prints_empty()
 {
     const std::string lines[] = {"a"};
@@ -467,11 +464,10 @@ void test_adjust_insert_shifts_lines()
     const std::string lines[] = {"a", "b", "c"};
     Editor ed;
     makeEditorWith(lines, 3, ed);
-    addBookmark(ed, "before", 0, 0); // line 0 -> stays
-    addBookmark(ed, "at", 1, 0);     // line 1 -> 2
-    addBookmark(ed, "after", 2, 0);  // line 2 -> 3
+    addBookmark(ed, "before", 0, 0);
+    addBookmark(ed, "at", 1, 0);
+    addBookmark(ed, "after", 2, 0);
     adjustBookmarksOnLineInsert(ed, 1);
-
     Bookmark b;
     CHECK(ed.bookmarks.get(findBookmark(ed, "before"), b) && b.line == 0);
     CHECK(ed.bookmarks.get(findBookmark(ed, "at"), b) && b.line == 2);
@@ -526,11 +522,10 @@ void test_adjust_delete_removes_and_shifts()
     const std::string lines[] = {"a", "b", "c"};
     Editor ed;
     makeEditorWith(lines, 3, ed);
-    addBookmark(ed, "before", 0, 0); // line 0 -> stays
-    addBookmark(ed, "hit", 1, 0);    // line 1 -> removed
-    addBookmark(ed, "after", 2, 0);  // line 2 -> 1
+    addBookmark(ed, "before", 0, 0);
+    addBookmark(ed, "hit", 1, 0);
+    addBookmark(ed, "after", 2, 0);
     adjustBookmarksOnLineDelete(ed, 1);
-
     CHECK(findBookmark(ed, "hit") == -1);
     CHECK(getBookmarkCount(ed) == 2);
     Bookmark b;
@@ -559,16 +554,12 @@ void test_adjust_delete_several_in_one_pass()
     const std::string lines[] = {"a", "b", "c", "d", "e"};
     Editor ed;
     makeEditorWith(lines, 5, ed);
-    // Bookmark every line.
     addBookmark(ed, "b0", 0, 0);
     addBookmark(ed, "b1", 1, 0);
     addBookmark(ed, "b2", 2, 0);
     addBookmark(ed, "b3", 3, 0);
     addBookmark(ed, "b4", 4, 0);
-
-    // Delete line 2: b2 is removed; b3->2, b4->3; b0, b1 unchanged.
     adjustBookmarksOnLineDelete(ed, 2);
-
     CHECK(findBookmark(ed, "b2") == -1);
     CHECK(getBookmarkCount(ed) == 4);
     Bookmark b;
@@ -608,10 +599,10 @@ void test_adjust_delete_below_all()
 
 int main()
 {
-    // addBookmark
     test_add_and_find_bookmark();
     test_add_empty_name_rejected();
-    test_add_name_with_surrounding_space_rejected();
+    test_add_whitespace_name_rejected();
+    test_add_name_without_whitespace_accepted();
     test_add_reserved_name_rejected();
     test_add_duplicate_name_rejected();
     test_add_bad_line_rejected();
@@ -619,12 +610,10 @@ int main()
     test_add_at_cursor_uses_editor_cursor();
     test_add_at_cursor_rejects_bad_cursor();
 
-    // findBookmark / removeBookmark
     test_find_unknown_returns_minus_one();
     test_remove_existing();
     test_remove_unknown();
 
-    // gotoBookmark / gotoBookmarkByIndex
     test_goto_sets_cursor();
     test_goto_clamps_col_when_line_shrank();
     test_goto_unknown_leaves_cursor();
@@ -633,27 +622,23 @@ int main()
     test_goto_by_index_bad_index();
     test_goto_by_index_clamps_col();
 
-    // previous position
     test_save_previous_stores_position();
     test_save_previous_updates_existing();
     test_save_previous_rejects_bad_cursor();
     test_return_previous_jumps();
     test_return_previous_missing();
 
-    // count / list / clear
     test_count_includes_hidden();
     test_list_empty();
     test_list_shows_visible_only();
     test_list_only_hidden_prints_empty();
     test_clear_removes_all();
 
-    // adjust on line insert
     test_adjust_insert_shifts_lines();
     test_adjust_insert_at_zero();
     test_adjust_insert_past_all();
     test_adjust_insert_negative_ignored();
 
-    // adjust on line delete
     test_adjust_delete_removes_and_shifts();
     test_adjust_delete_last_line();
     test_adjust_delete_several_in_one_pass();

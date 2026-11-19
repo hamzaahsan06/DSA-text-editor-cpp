@@ -3,8 +3,9 @@
 #include <fstream>
 #include <iostream>
 
-// Write every line with a terminating newline. A final newline lets a second
-// newline represent a trailing empty line when the file is read back.
+// Write every line to path, each one ending with '\n'. Returns false on any I/O error.
+// Ending every line (including the last) is what lets openFile read back exactly
+// the same number of lines: without it, a trailing empty line would be lost.
 // Walks nodes via getHead()/next so the whole save is O(n).
 static bool writeToFile(Editor &ed, const std::string &path)
 {
@@ -15,8 +16,7 @@ static bool writeToFile(Editor &ed, const std::string &path)
     typedef DoublyLinkedList<Line>::Node Node;
     for (Node *cur = ed.document.getHead(); cur != nullptr; cur = cur->next)
     {
-        out << cur->data.text;
-        out << '\n';
+        out << cur->data.text << '\n';
     }
     out.flush();
     return out.good();
@@ -24,6 +24,9 @@ static bool writeToFile(Editor &ed, const std::string &path)
 
 bool newDocument(Editor &ed)
 {
+    // reset() clears the document, both stacks and the bookmarks, puts the
+    // cursor at (0, 0), clears the filename and the modified flag, and leaves
+    // one empty line to type into.
     ed.reset();
     return true;
 }
@@ -61,14 +64,16 @@ bool openFile(Editor &ed, const std::string &path)
         return false;
     }
 
-    // Keep the editor invariant that a document always has an editable line,
-    // including when opening an empty file.
+    // The file was read completely, so from here on nothing can fail.
+    // An empty file becomes one empty line, same as a new document.
     if (temp.isEmpty())
     {
-        Line emptyLine;
-        temp.insertAtTail(emptyLine);
+        Line blank;
+        temp.insertAtTail(blank);
     }
 
+    // Replace the document and drop everything that referred to the old one:
+    // undoing into a different file would corrupt the editor.
     ed.document = temp;
     ed.undoStack.clear();
     ed.redoStack.clear();

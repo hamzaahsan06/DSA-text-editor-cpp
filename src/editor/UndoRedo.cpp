@@ -1,15 +1,62 @@
 #include "editor/UndoRedo.h"
 
-// Pushes op onto undoStack and clears redoStack. O(1).
-bool UndoRedo::record(Editor& ed, const Command& op) {
-    if (op.line < 0 || op.col < 0) return false;
-    if (!ed.undoStack.push(op)) return false;
+static bool buildInsertedText(const std::string &current, int col,
+                              const std::string &insertText, std::string &out)
+{
+    if (col < 0 || col > (int)current.length())
+        return false;
+    out = current.substr(0, col) + insertText + current.substr(col);
+    return true;
+}
+
+static bool buildErasedText(const std::string &current, int col,
+                            int removeLength, std::string &out)
+{
+    if (col < 0 || removeLength < 0 || col + removeLength > (int)current.length())
+        return false;
+    out = current.substr(0, col) + current.substr(col + removeLength);
+    return true;
+}
+
+static int lineCountOfBlob(const std::string &blob)
+{
+    int lines = 1;
+    for (int i = 0; i < (int)blob.length(); ++i)
+    {
+        if (blob[i] == '\n')
+            ++lines;
+    }
+    return lines;
+}
+
+static void splitBlobIntoLines(const std::string &blob, DynamicArray<std::string> &lines)
+{
+    int start = 0;
+    for (int i = 0; i < (int)blob.length(); ++i)
+    {
+        if (blob[i] == '\n')
+        {
+            lines.pushBack(blob.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    lines.pushBack(blob.substr(start));
+}
+
+bool UndoRedo::record(Editor &ed, const Command &op)
+{
+    if (op.line < 0 || op.col < 0)
+        return false;
+    if (ed.getLine(op.line) == nullptr)
+        return false;
+    if (!ed.undoStack.push(op))
+        return false;
     ed.redoStack.clear();
     return true;
 }
 
-// Records an insert at (line, col). O(1).
-bool UndoRedo::recordInsert(Editor& ed, int line, int col, const std::string& text) {
+bool UndoRedo::recordInsert(Editor &ed, int line, int col, const std::string &text)
+{
     Command op;
     op.type = INSERT_TEXT;
     op.line = line;
@@ -19,8 +66,8 @@ bool UndoRedo::recordInsert(Editor& ed, int line, int col, const std::string& te
     return record(ed, op);
 }
 
-// Records an erase at (line, col). O(1).
-bool UndoRedo::recordErase(Editor& ed, int line, int col, const std::string& erasedText) {
+bool UndoRedo::recordErase(Editor &ed, int line, int col, const std::string &erasedText)
+{
     Command op;
     op.type = DELETE_TEXT;
     op.line = line;
@@ -30,9 +77,9 @@ bool UndoRedo::recordErase(Editor& ed, int line, int col, const std::string& era
     return record(ed, op);
 }
 
-// Records a replace at (line, col). O(1).
-bool UndoRedo::recordReplace(Editor& ed, int line, int col,
-                             const std::string& oldText, const std::string& newText) {
+bool UndoRedo::recordReplace(Editor &ed, int line, int col,
+                             const std::string &oldText, const std::string &newText)
+{
     Command op;
     op.type = REPLACE;
     op.line = line;
@@ -42,115 +89,214 @@ bool UndoRedo::recordReplace(Editor& ed, int line, int col,
     return record(ed, op);
 }
 
-bool UndoRedo::recordReplaceLine(Editor& ed, int line,
-                                 const std::string& oldText, const std::string& newText) {
+bool UndoRedo::recordInsertLine(Editor &ed, int line, const std::string &text)
+{
+    if (line < 0 || line > ed.getLineCount())
+        return false;
     Command op;
-    op.type = REPLACE;
+    op.type = INSERT_LINE;
+    op.line = line;
+    op.col = 0;
+    op.oldText = "";
+    op.newText = text;
+    if (!ed.undoStack.push(op))
+        return false;
+    ed.redoStack.clear();
+    return true;
+}
+
+bool UndoRedo::recordDeleteLine(Editor &ed, int line, const std::string &oldText)
+{
+    if (line < 0 || line >= ed.getLineCount())
+        return false;
+    Command op;
+    op.type = DELETE_LINE;
     op.line = line;
     op.col = 0;
     op.oldText = oldText;
-    op.newText = newText;
-    op.wholeLine = true;
-    return record(ed, op);
+    op.newText = "";
+    if (!ed.undoStack.push(op))
+        return false;
+    ed.redoStack.clear();
+    return true;
 }
 
-// Reverts the most recent command. O(m).
-bool UndoRedo::undo(Editor& ed) {
-    if (ed.undoStack.isEmpty() || ed.redoStack.isFull()) return false;
+static bool applyUndo(Editor &ed, const Command &op)
+{
+    Line *line = ed.getLine(op.line);
 
-    Command op;
-    if (!ed.undoStack.peek(op)) return false;
-    Line* line = ed.getLine(op.line);
-    if (line == nullptr) return false;
-    std::string& text = line->text;
-    if (op.col < 0) return false;
-
-    if (op.wholeLine) {
-        if (op.type != REPLACE || text != op.newText) return false;
-        text = op.oldText;
-    } else if (op.type == INSERT_TEXT) {
-        if (op.col > (int)text.size() || op.newText.size() > text.size() - op.col ||
-            text.compare(op.col, op.newText.size(), op.newText) != 0) return false;
-        text.erase(op.col, op.newText.size());
-    } else if (op.type == DELETE_TEXT) {
-        if (op.col > (int)text.size()) return false;
-        text.insert(op.col, op.oldText);
-    } else if (op.type == REPLACE) {
-        if (op.col > (int)text.size() || op.newText.size() > text.size() - op.col ||
-            text.compare(op.col, op.newText.size(), op.newText) != 0) return false;
-        text.replace(op.col, op.newText.size(), op.oldText);
-    } else {
-        return false;
+    if (op.type == INSERT_TEXT || op.type == DELETE_TEXT || op.type == REPLACE)
+    {
+        if (line == nullptr)
+            return false;
+        std::string updated;
+        if (op.type == INSERT_TEXT)
+        {
+            if (!buildErasedText(line->text, op.col, (int)op.newText.length(), updated))
+                return false;
+        }
+        else if (op.type == DELETE_TEXT)
+        {
+            if (!buildInsertedText(line->text, op.col, op.oldText, updated))
+                return false;
+        }
+        else
+        {
+            std::string middle;
+            if (!buildErasedText(line->text, op.col, (int)op.newText.length(), middle))
+                return false;
+            if (!buildInsertedText(middle, op.col, op.oldText, updated))
+                return false;
+        }
+        line->text = updated;
+        return true;
     }
 
+    if (op.type == INSERT_LINE)
+    {
+        // If newText is not empty, this was a line split (TextOps::insertNewLine).
+        // We must merge the two lines back together.
+        if (!op.newText.empty())
+        {
+            if (line == nullptr)
+                return false;
+            Line *nextLine = ed.getLine(op.line + 1);
+            if (nextLine != nullptr)
+            {
+                line->text = op.newText; // Restore the merged text
+                Line dummy;
+                ed.document.removeAtPosition(op.line + 1, dummy);
+            }
+            return true;
+        }
+        // Normal empty line insert undo
+        if (line == nullptr)
+            return false;
+        Line removed;
+        return ed.document.removeAtPosition(op.line, removed);
+    }
+
+    if (op.type == DELETE_LINE)
+    {
+        DynamicArray<std::string> pieces;
+        splitBlobIntoLines(op.oldText, pieces);
+        for (int i = 0; i < pieces.size(); ++i)
+        {
+            Line restored;
+            pieces.get(i, restored.text);
+            if (!ed.document.insertAtPosition(op.line + i, restored))
+                return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool applyRedo(Editor &ed, const Command &op)
+{
+    Line *line = ed.getLine(op.line);
+
+    if (op.type == INSERT_TEXT || op.type == DELETE_TEXT || op.type == REPLACE)
+    {
+        if (line == nullptr)
+            return false;
+        std::string updated;
+        if (op.type == INSERT_TEXT)
+        {
+            if (!buildInsertedText(line->text, op.col, op.newText, updated))
+                return false;
+        }
+        else if (op.type == DELETE_TEXT)
+        {
+            if (!buildErasedText(line->text, op.col, (int)op.oldText.length(), updated))
+                return false;
+        }
+        else
+        {
+            std::string middle;
+            if (!buildErasedText(line->text, op.col, (int)op.oldText.length(), middle))
+                return false;
+            if (!buildInsertedText(middle, op.col, op.newText, updated))
+                return false;
+        }
+        line->text = updated;
+        return true;
+    }
+
+    if (op.type == INSERT_LINE)
+    {
+        // If newText is not empty, it was a split. Re-split it.
+        if (!op.newText.empty())
+        {
+            if (line == nullptr)
+                return false;
+            Line below;
+            below.text = line->text.substr(op.col);
+            line->text.erase(op.col);
+            ed.document.insertAtPosition(op.line + 1, below);
+            return true;
+        }
+        Line fresh;
+        fresh.text = op.newText;
+        return ed.document.insertAtPosition(op.line, fresh);
+    }
+
+    if (op.type == DELETE_LINE)
+    {
+        int removeCount = lineCountOfBlob(op.oldText);
+        for (int i = 0; i < removeCount; ++i)
+        {
+            if (ed.getLine(op.line) == nullptr)
+                return false;
+            Line removed;
+            if (!ed.document.removeAtPosition(op.line, removed))
+                return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+bool UndoRedo::undo(Editor &ed)
+{
+    Command op;
+    if (!ed.undoStack.peek(op))
+        return false;
+    if (!applyUndo(ed, op))
+        return false;
     ed.undoStack.pop(op);
-    if (!ed.redoStack.push(op)) {
-        // The capacity was checked above; this is defensive and should be unreachable.
-        if (op.wholeLine) text = op.newText;
-        else if (op.type == INSERT_TEXT) text.insert(op.col, op.newText);
-        else if (op.type == DELETE_TEXT) text.erase(op.col, op.oldText.size());
-        else text.replace(op.col, op.oldText.size(), op.newText);
-        ed.undoStack.push(op);
-        return false;
-    }
+    ed.redoStack.push(op);
     ed.setModified(true);
     return true;
 }
 
-// Reapplies the most recently undone command. O(m).
-bool UndoRedo::redo(Editor& ed) {
-    if (ed.redoStack.isEmpty() || ed.undoStack.isFull()) return false;
-
+bool UndoRedo::redo(Editor &ed)
+{
     Command op;
-    if (!ed.redoStack.peek(op)) return false;
-    Line* line = ed.getLine(op.line);
-    if (line == nullptr) return false;
-    std::string& text = line->text;
-    if (op.col < 0) return false;
-
-    if (op.wholeLine) {
-        if (op.type != REPLACE || text != op.oldText) return false;
-        text = op.newText;
-    } else if (op.type == INSERT_TEXT) {
-        if (op.col > (int)text.size()) return false;
-        text.insert(op.col, op.newText);
-    } else if (op.type == DELETE_TEXT) {
-        if (op.col > (int)text.size() || op.oldText.size() > text.size() - op.col ||
-            text.compare(op.col, op.oldText.size(), op.oldText) != 0) return false;
-        text.erase(op.col, op.oldText.size());
-    } else if (op.type == REPLACE) {
-        if (op.col > (int)text.size() || op.oldText.size() > text.size() - op.col ||
-            text.compare(op.col, op.oldText.size(), op.oldText) != 0) return false;
-        text.replace(op.col, op.oldText.size(), op.newText);
-    } else {
+    if (!ed.redoStack.peek(op))
         return false;
-    }
-
+    if (!applyRedo(ed, op))
+        return false;
     ed.redoStack.pop(op);
-    if (!ed.undoStack.push(op)) {
-        if (op.wholeLine) text = op.oldText;
-        else if (op.type == INSERT_TEXT) text.erase(op.col, op.newText.size());
-        else if (op.type == DELETE_TEXT) text.insert(op.col, op.oldText);
-        else text.replace(op.col, op.newText.size(), op.oldText);
-        ed.redoStack.push(op);
-        return false;
-    }
+    ed.undoStack.push(op);
     ed.setModified(true);
     return true;
 }
 
-// True if there is at least one command to undo. O(1).
-bool UndoRedo::canUndo(const Editor& ed) const {
+bool UndoRedo::canUndo(const Editor &ed) const
+{
     return !ed.undoStack.isEmpty();
 }
 
-// True if there is at least one command to redo. O(1).
-bool UndoRedo::canRedo(const Editor& ed) const {
+bool UndoRedo::canRedo(const Editor &ed) const
+{
     return !ed.redoStack.isEmpty();
 }
 
-// Clears both history stacks. O(n).
-void UndoRedo::clearHistory(Editor& ed) {
+void UndoRedo::clearHistory(Editor &ed)
+{
     ed.undoStack.clear();
     ed.redoStack.clear();
 }

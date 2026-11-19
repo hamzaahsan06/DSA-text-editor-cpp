@@ -1,7 +1,6 @@
 #include "editor/Display.h"
-#include "editor/Formatting.h"
 
-typedef DoublyLinkedList<std::string>::Node Node;
+typedef DoublyLinkedList<Line>::Node Node;
 
 // True for space, tab, newline, carriage return, vertical tab and form feed.
 static bool isWhitespace(char c) {
@@ -21,15 +20,32 @@ static void printLabel(std::ostream& out, int number, int width) {
     out << number << " | ";
 }
 
-DocStats getStats(const DoublyLinkedList<std::string>& doc) {
+// Node at index, walking from the nearer end. Returns nullptr if out of range.
+// Used instead of DoublyLinkedList::get() so the Line (and its formats) is not copied.
+static Node* nodeAtIndex(const DoublyLinkedList<Line>& doc, int index) {
+    int n = doc.size();
+    if (index < 0 || index >= n) return nullptr;
+
+    Node* cur;
+    if (index < n / 2) {
+        cur = doc.getHead();
+        for (int i = 0; i < index; ++i) cur = cur->next;
+    } else {
+        cur = doc.getTail();
+        for (int i = n - 1; i > index; --i) cur = cur->prev;
+    }
+    return cur;
+}
+
+DocStats getStats(const Editor& ed) {
     DocStats s;
-    s.lines = doc.size();
+    s.lines = ed.document.size();
     s.words = 0;
     s.chars = 0;
     s.charsNoSpaces = 0;
 
-    for (Node* cur = doc.getHead(); cur != nullptr; cur = cur->next) {
-        const std::string& text = cur->data;
+    for (Node* cur = ed.document.getHead(); cur != nullptr; cur = cur->next) {
+        const std::string& text = cur->data.text;
         s.chars += static_cast<int>(text.size());
 
         bool inWord = false;                 // words never span two lines
@@ -45,79 +61,47 @@ DocStats getStats(const DoublyLinkedList<std::string>& doc) {
     return s;
 }
 
-void displayDocument(const DoublyLinkedList<std::string>& doc, std::ostream& out) {
-    if (doc.isEmpty()) {
+void displayDocument(const Editor& ed, std::ostream& out) {
+    if (ed.document.isEmpty()) {
         out << "(document is empty)\n";
         return;
     }
 
-    int width = digitCount(doc.size());
+    int width = digitCount(ed.document.size());
     int number = 1;
     // Follow node pointers: O(n). Calling get(i) in a loop would be O(n^2).
-    for (Node* cur = doc.getHead(); cur != nullptr; cur = cur->next, ++number) {
+    for (Node* cur = ed.document.getHead(); cur != nullptr; cur = cur->next, ++number) {
         printLabel(out, number, width);
-        out << cur->data << '\n';
+        out << cur->data.text << '\n';
     }
 }
 
-void displayDocument(const Editor& editor, std::ostream& out) {
-    if (editor.getLineCount() == 0) {
-        out << "(document is empty)\n";
-        return;
-    }
-    Formatting formatting;
-    const int width = digitCount(editor.getLineCount());
-    for (int i = 0; i < editor.getLineCount(); ++i) {
-        Line* line = const_cast<Editor&>(editor).getLine(i);
-        if (!line) continue;
-        printLabel(out, i + 1, width);
-        out << formatting.applyFormatting(*line) << '\n';
-    }
-}
-
-bool displayLine(const DoublyLinkedList<std::string>& doc, int index, std::ostream& out) {
-    if (doc.isEmpty()) {
+bool displayLine(const Editor& ed, int index, std::ostream& out) {
+    if (ed.document.isEmpty()) {
         out << "Error: the document is empty.\n";
         return false;
     }
 
-    std::string text;
-    if (!doc.get(index, text)) {
+    Node* node = nodeAtIndex(ed.document, index);
+    if (node == nullptr) {
         out << "Error: line " << (index + 1) << " does not exist (document has "
-            << doc.size() << " lines).\n";
+            << ed.document.size() << " lines).\n";
         return false;
     }
 
-    printLabel(out, index + 1, digitCount(doc.size()));
-    out << text << '\n';
+    printLabel(out, index + 1, digitCount(ed.document.size()));
+    out << node->data.text << '\n';
     return true;
 }
 
-bool displayLine(const Editor& editor, int index, std::ostream& out) {
-    if (editor.getLineCount() == 0) {
-        out << "Error: the document is empty.\n";
-        return false;
-    }
-    Line* line = const_cast<Editor&>(editor).getLine(index);
-    if (!line) {
-        out << "Error: line " << (index + 1) << " does not exist (document has "
-            << editor.getLineCount() << " lines).\n";
-        return false;
-    }
-    printLabel(out, index + 1, digitCount(editor.getLineCount()));
-    Formatting formatting;
-    out << formatting.applyFormatting(*line) << '\n';
-    return true;
-}
-
-void displayStats(const DoublyLinkedList<std::string>& doc,
-                  const std::string& filename, bool modified, std::ostream& out) {
-    DocStats s = getStats(doc);
+void displayStats(const Editor& ed, std::ostream& out) {
+    DocStats s = getStats(ed);
+    std::string filename = ed.getFilename();
 
     out << "--- Document info ---\n";
     out << "File       : " << (filename.empty() ? "(unsaved)" : filename) << '\n';
     out << "Lines      : " << s.lines << '\n';
     out << "Words      : " << s.words << '\n';
     out << "Characters : " << s.chars << " (" << s.charsNoSpaces << " without spaces)\n";
-    out << "Modified   : " << (modified ? "yes" : "no") << '\n';
+    out << "Modified   : " << (ed.isModified() ? "yes" : "no") << '\n';
 }

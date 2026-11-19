@@ -3,7 +3,6 @@
 
 #include <iostream>
 #include <string>
-#include "ds/DoublyLinkedList.h"
 #include "editor/Editor.h"
 
 // Counts for the whole document. Newlines are not counted as characters.
@@ -14,27 +13,19 @@ struct DocStats {
     int charsNoSpaces;  // characters that are not whitespace
 };
 
-// Compute the counts in one pass. Empty document gives all zeros.
-DocStats getStats(const DoublyLinkedList<std::string>& doc);
+// Compute the counts in one pass. A document with no lines gives all zeros.
+DocStats getStats(const Editor& ed);
 
 // Print the whole document with 1-based line numbers.
-// An empty document prints "(document is empty)".
-void displayDocument(const DoublyLinkedList<std::string>& doc,
-                     std::ostream& out = std::cout);
-
-// Editor overloads render each line's format spans as ANSI styles.
-void displayDocument(const Editor& editor, std::ostream& out = std::cout);
+// A document with no lines prints "(document is empty)".
+void displayDocument(const Editor& ed, std::ostream& out = std::cout);
 
 // Print one line. index is 0-based (same as the list); the label shown is
 // 1-based. Returns false and prints an error if the index is invalid
-// or the document is empty.
-bool displayLine(const DoublyLinkedList<std::string>& doc, int index,
-                 std::ostream& out = std::cout);
-bool displayLine(const Editor& editor, int index, std::ostream& out = std::cout);
+// or the document has no lines.
+bool displayLine(const Editor& ed, int index, std::ostream& out = std::cout);
 
 // Print file name, line / word / character counts and the unsaved flag.
-void displayStats(const DoublyLinkedList<std::string>& doc,
-                  const std::string& filename, bool modified,
-                  std::ostream& out = std::cout);
+void displayStats(const Editor& ed, std::ostream& out = std::cout);
 
 #endif // EDITOR_DISPLAY_H

@@ -1,60 +1,50 @@
 #include "editor/Validation.h"
 
-bool isDocumentEmpty(const DoublyLinkedList<std::string>& doc) {
-    return doc.isEmpty();
+typedef DoublyLinkedList<Line>::Node Node;
+
+// Length of the text on `line`, or -1 if the line does not exist.
+// Walks from the nearer end and reads the node in place, so the Line
+// (and its formats array) is never copied.
+static int lineLength(const Editor& ed, int line) {
+    int n = ed.document.size();
+    if (line < 0 || line >= n) return -1;
+
+    Node* cur;
+    if (line < n / 2) {
+        cur = ed.document.getHead();
+        for (int i = 0; i < line; ++i) cur = cur->next;
+    } else {
+        cur = ed.document.getTail();
+        for (int i = n - 1; i > line; --i) cur = cur->prev;
+    }
+    return static_cast<int>(cur->data.text.size());
+}
+
+bool isDocumentEmpty(const Editor& ed) {
+    return ed.document.isEmpty();
 }
 
 bool isEmptyString(const std::string& s) {
     return s.empty();
 }
 
-bool isValidLine(const DoublyLinkedList<std::string>& doc, int line) {
-    return line >= 0 && line < doc.size();
+bool isValidLine(const Editor& ed, int line) {
+    return line >= 0 && line < ed.document.size();
 }
 
-bool isValidColumn(const DoublyLinkedList<std::string>& doc, int line, int col) {
-    std::string text;
-    if (!doc.get(line, text)) return false;      // also rejects a bad line
-    return col >= 0 && col <= static_cast<int>(text.size());
+bool isValidColumn(const Editor& ed, int line, int col) {
+    int len = lineLength(ed, line);
+    if (len < 0) return false;                   // also rejects a bad line
+    return col >= 0 && col <= len;
 }
 
-bool isValidRange(const DoublyLinkedList<std::string>& doc, int startLine, int endLine) {
-    return isValidLine(doc, startLine) && isValidLine(doc, endLine)
+bool isValidRange(const Editor& ed, int startLine, int endLine) {
+    return isValidLine(ed, startLine) && isValidLine(ed, endLine)
         && startLine <= endLine;
 }
 
-bool isValidColumnRange(const DoublyLinkedList<std::string>& doc, int line,
-                        int startCol, int endCol) {
-    std::string text;
-    if (!doc.get(line, text)) return false;
-    return startCol >= 0 && startCol <= endCol
-        && endCol <= static_cast<int>(text.size());
-}
-
-bool isDocumentEmpty(const Editor& editor) {
-    return editor.getLineCount() == 0;
-}
-
-bool isValidLine(const Editor& editor, int line) {
-    return line >= 0 && line < editor.getLineCount();
-}
-
-bool isValidColumn(const Editor& editor, int line, int col) {
-    const Line* target = editor.getLine(line);
-    return target && col >= 0 && col <= static_cast<int>(target->text.size());
-}
-
-bool isValidRange(const Editor& editor, int startLine, int endLine) {
-    return isValidLine(editor, startLine) && isValidLine(editor, endLine)
-        && startLine <= endLine;
-}
-
-bool isValidColumnRange(const Editor& editor, int line, int startCol, int endCol) {
-    const Line* target = editor.getLine(line);
-    return target && startCol >= 0 && startCol <= endCol
-        && endCol <= static_cast<int>(target->text.size());
-}
-
-bool isValidReplacementText(const std::string& text) {
-    return text.find_first_of("\r\n") == std::string::npos;
+bool isValidColumnRange(const Editor& ed, int line, int startCol, int endCol) {
+    int len = lineLength(ed, line);
+    if (len < 0) return false;
+    return startCol >= 0 && startCol <= endCol && endCol <= len;
 }
