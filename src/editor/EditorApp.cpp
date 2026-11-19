@@ -36,6 +36,18 @@ static std::string intToString(int value)
     return digits;
 }
 
+// True if the string contains a space, tab, newline or carriage return.
+static bool hasWhitespace(const std::string &s)
+{
+    for (int i = 0; i < (int)s.length(); ++i)
+    {
+        char c = s[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            return true;
+    }
+    return false;
+}
+
 // A Command struct for the app's own table (unrelated to UndoRedo's Command).
 struct AppCmd
 {
@@ -217,7 +229,7 @@ void EditorApp::handleLine(const std::string &line)
     if (cmd == "new")
         cmdNew(tokens);
     else if (cmd == "open")
-        cmdOpen(tokens);
+        cmdOpen(line, tokens);
     else if (cmd == "save")
         cmdSave(tokens);
     else if (cmd == "saveas")
@@ -240,9 +252,38 @@ void EditorApp::handleLine(const std::string &line)
         cmdUndo(tokens);
     else if (cmd == "redo")
         cmdRedo(tokens);
+    else if (cmd == "ins")
+        cmdIns(line, tokens);
+    else if (cmd == "add")
+        cmdAdd(line, tokens);
+    else if (cmd == "nl")
+        cmdNl(tokens);
+    else if (cmd == "del")
+        cmdDel(tokens);
+    else if (cmd == "delw")
+        cmdDelw(tokens);
+    else if (cmd == "delr")
+        cmdDelr(tokens);
+    else if (cmd == "dell")
+        cmdDell(tokens);
+    else if (cmd == "find")
+        cmdFind(line, tokens);
+    else if (cmd == "replace")
+        cmdReplace(tokens);
+    else if (cmd == "replaceall")
+        cmdReplaceAll(tokens);
+    else if (cmd == "mark")
+        cmdMark(tokens);
+    else if (cmd == "marks")
+        cmdMarks(tokens);
+    else if (cmd == "jump")
+        cmdJump(tokens);
+    else if (cmd == "unmark")
+        cmdUnmark(tokens);
+    else if (cmd == "back")
+        cmdBack(tokens);
     else
     {
-        // Not one of the currently-implemented commands.
         std::string known = appUsage(cmd);
         if (!known.empty())
         {
@@ -255,12 +296,12 @@ void EditorApp::handleLine(const std::string &line)
     }
 }
 
-// ----- one handler per command -----
+// ----- FILE handlers -----
 
 // new: discard any unsaved changes, then reset the document.
 void EditorApp::cmdNew(const DynamicArray<Token> &tok)
 {
-    (void)tok; // no arguments
+    (void)tok;
     if (!confirmDiscardChanges())
     {
         message = "Cancelled.";
@@ -273,20 +314,15 @@ void EditorApp::cmdNew(const DynamicArray<Token> &tok)
     clampCursor();
 }
 
-// open <filename>: discard changes, then load from disk.
-void EditorApp::cmdOpen(const DynamicArray<Token> &tok)
+// open <filename>: filename is the rest of the line, so spaces work.
+void EditorApp::cmdOpen(const std::string &line, const DynamicArray<Token> &tok)
 {
     if (tok.size() < 2)
     {
         message = appUsage("open");
         return;
     }
-    std::string filename = restOfLine(*(new std::string()), tok, 1); // not used
-    // Actually use restOfLine against the original line? We don't have it here.
-    // Simpler: use token 1's text (quoted names lose their quotes in splitLine).
-    Token t;
-    tok.get(1, t);
-    filename = t.text;
+    std::string filename = restOfLine(line, tok, 1);
     if (filename.empty())
     {
         message = appUsage("open");
@@ -363,6 +399,8 @@ void EditorApp::cmdExit(const DynamicArray<Token> &tok)
     running = false;
 }
 
+// ----- VIEW handlers -----
+
 // info: capture the full stats block.
 void EditorApp::cmdInfo(const DynamicArray<Token> &tok)
 {
@@ -418,7 +456,7 @@ void EditorApp::cmdGoto(const DynamicArray<Token> &tok)
         return;
     }
 
-    (void)savePreviousPosition(ed); // ignore result
+    (void)savePreviousPosition(ed);
     ed.cursorLine = line1 - 1;
     ed.cursorCol = col1 - 1;
     clampCursor();
@@ -474,6 +512,8 @@ void EditorApp::cmdHelp(const DynamicArray<Token> &tok)
     printHelp(std::cout, topic);
     message = cap.getText();
 }
+
+// ----- HISTORY handlers -----
 
 // undo [n]
 void EditorApp::cmdUndo(const DynamicArray<Token> &tok)
@@ -543,4 +583,707 @@ void EditorApp::cmdRedo(const DynamicArray<Token> &tok)
     else
         message = "Redid " + intToString(done) + " operation(s).";
     clampCursor();
+}
+
+// ----- EDIT handlers -----
+
+// ins <line> <col> <text>: text is the rest of the line, so spaces are kept.
+void EditorApp::cmdIns(const std::string &line, const DynamicArray<Token> &tok)
+{
+    if (tok.size() < 3)
+    {
+        message = appUsage("ins");
+        return;
+    }
+
+    int line1 = 0;
+    int col1 = 0;
+    Token t;
+    tok.get(1, t);
+    if (!parsePositiveInt(t.text, line1))
+    {
+        message = appUsage("ins");
+        return;
+    }
+    tok.get(2, t);
+    if (!parsePositiveInt(t.text, col1))
+    {
+        message = appUsage("ins");
+        return;
+    }
+
+    std::string text = restOfLine(line, tok, 3);
+    if (text.empty())
+    {
+        message = appUsage("ins");
+        return;
+    }
+
+    int line0 = line1 - 1;
+    int col0 = col1 - 1;
+    int count = (int)text.length();
+
+    OutputCapture cap;
+    bool ok = insertText(ed, line0, col0, text);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Inserted " + intToString(count) + " character(s) at line " + intToString(line1) + ", column " + intToString(col1) + ".";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Insert failed.";
+    }
+    clampCursor();
+}
+
+// add <text>: insert text at the cursor. Empty doc uses (0, 0).
+void EditorApp::cmdAdd(const std::string &line, const DynamicArray<Token> &tok)
+{
+    if (tok.size() < 2)
+    {
+        message = appUsage("add");
+        return;
+    }
+
+    std::string text = restOfLine(line, tok, 1);
+    if (text.empty())
+    {
+        message = appUsage("add");
+        return;
+    }
+
+    int line0 = 0;
+    int col0 = 0;
+    if (!ed.document.isEmpty())
+    {
+        clampCursor();
+        line0 = ed.cursorLine;
+        col0 = ed.cursorCol;
+    }
+
+    int count = (int)text.length();
+    int showLine = line0 + 1;
+    int showCol = col0 + 1;
+
+    OutputCapture cap;
+    bool ok = insertText(ed, line0, col0, text);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Inserted " + intToString(count) + " character(s) at line " + intToString(showLine) + ", column " + intToString(showCol) + ".";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Insert failed.";
+    }
+    clampCursor();
+}
+
+// nl [line col]: split a line. No args = split at the cursor.
+void EditorApp::cmdNl(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 1 && tok.size() != 3)
+    {
+        message = appUsage("nl");
+        return;
+    }
+
+    int line0 = 0;
+    int col0 = 0;
+    if (tok.size() == 3)
+    {
+        int line1 = 0;
+        int col1 = 0;
+        Token t;
+        tok.get(1, t);
+        if (!parsePositiveInt(t.text, line1))
+        {
+            message = appUsage("nl");
+            return;
+        }
+        tok.get(2, t);
+        if (!parsePositiveInt(t.text, col1))
+        {
+            message = appUsage("nl");
+            return;
+        }
+        line0 = line1 - 1;
+        col0 = col1 - 1;
+    }
+    else
+    {
+        if (!ed.document.isEmpty())
+        {
+            clampCursor();
+            line0 = ed.cursorLine;
+            col0 = ed.cursorCol;
+        }
+    }
+
+    OutputCapture cap;
+    bool ok = insertNewLine(ed, line0, col0);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "New line inserted.";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Insert new line failed.";
+    }
+    clampCursor();
+}
+
+// del <line> <col>: delete one character.
+void EditorApp::cmdDel(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 3)
+    {
+        message = appUsage("del");
+        return;
+    }
+
+    int line1 = 0;
+    int col1 = 0;
+    Token t;
+    tok.get(1, t);
+    if (!parsePositiveInt(t.text, line1))
+    {
+        message = appUsage("del");
+        return;
+    }
+    tok.get(2, t);
+    if (!parsePositiveInt(t.text, col1))
+    {
+        message = appUsage("del");
+        return;
+    }
+
+    OutputCapture cap;
+    bool ok = deleteChar(ed, line1 - 1, col1 - 1);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Deleted 1 character.";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Delete failed.";
+    }
+    clampCursor();
+}
+
+// delw <line> <col>: delete the word at (line, col).
+void EditorApp::cmdDelw(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 3)
+    {
+        message = appUsage("delw");
+        return;
+    }
+
+    int line1 = 0;
+    int col1 = 0;
+    Token t;
+    tok.get(1, t);
+    if (!parsePositiveInt(t.text, line1))
+    {
+        message = appUsage("delw");
+        return;
+    }
+    tok.get(2, t);
+    if (!parsePositiveInt(t.text, col1))
+    {
+        message = appUsage("delw");
+        return;
+    }
+
+    OutputCapture cap;
+    bool ok = deleteWord(ed, line1 - 1, col1 - 1);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Deleted word.";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Delete word failed.";
+    }
+    clampCursor();
+}
+
+// delr <line> <startCol> <endCol>: inclusive range.
+void EditorApp::cmdDelr(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 4)
+    {
+        message = appUsage("delr");
+        return;
+    }
+
+    int line1 = 0;
+    int start1 = 0;
+    int end1 = 0;
+    Token t;
+    tok.get(1, t);
+    if (!parsePositiveInt(t.text, line1))
+    {
+        message = appUsage("delr");
+        return;
+    }
+    tok.get(2, t);
+    if (!parsePositiveInt(t.text, start1))
+    {
+        message = appUsage("delr");
+        return;
+    }
+    tok.get(3, t);
+    if (!parsePositiveInt(t.text, end1))
+    {
+        message = appUsage("delr");
+        return;
+    }
+
+    if (start1 > end1)
+    {
+        message = "Error: start column must not be after end column.";
+        return;
+    }
+
+    int count = end1 - start1 + 1;
+
+    OutputCapture cap;
+    bool ok = deleteText(ed, line1 - 1, start1 - 1, end1);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Deleted " + intToString(count) + " character(s).";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Delete range failed.";
+    }
+    clampCursor();
+}
+
+// dell <from> [to]: delete one line or an inclusive range.
+void EditorApp::cmdDell(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 2 && tok.size() != 3)
+    {
+        message = appUsage("dell");
+        return;
+    }
+
+    int from1 = 0;
+    int to1 = 0;
+    Token t;
+    tok.get(1, t);
+    if (!parsePositiveInt(t.text, from1))
+    {
+        message = appUsage("dell");
+        return;
+    }
+    if (tok.size() == 3)
+    {
+        tok.get(2, t);
+        if (!parsePositiveInt(t.text, to1))
+        {
+            message = appUsage("dell");
+            return;
+        }
+    }
+    else
+    {
+        to1 = from1;
+    }
+
+    if (from1 > to1)
+    {
+        message = "Error: start line must not be after end line.";
+        return;
+    }
+
+    int count = to1 - from1 + 1;
+
+    OutputCapture cap;
+    bool ok = deleteLines(ed, from1 - 1, to1 - 1);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Deleted " + intToString(count) + " line(s).";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Delete lines failed.";
+    }
+    clampCursor();
+}
+
+// ----- SEARCH handlers -----
+
+// find <text>: shows at most 10 matches, then jumps to the first.
+void EditorApp::cmdFind(const std::string &line, const DynamicArray<Token> &tok)
+{
+    if (tok.size() < 2)
+    {
+        message = "Error: nothing to search for.";
+        return;
+    }
+    if (ed.document.isEmpty())
+    {
+        message = "Error: the document is empty.";
+        return;
+    }
+
+    std::string text = restOfLine(line, tok, 1);
+    if (text.empty())
+    {
+        message = "Error: nothing to search for.";
+        return;
+    }
+
+    DynamicArray<Position> hits = searchAll(ed, text);
+    int total = hits.size();
+    if (total == 0)
+    {
+        message = "Not found.";
+        return;
+    }
+
+    int shown = total;
+    if (shown > 10)
+        shown = 10;
+
+    std::string out = "Found " + intToString(total) + " occurrence(s):\n";
+    for (int i = 0; i < shown; ++i)
+    {
+        Position p;
+        hits.get(i, p);
+        out += "Line " + intToString(p.line + 1) + ", Column " + intToString(p.col + 1) + "\n";
+    }
+    if (total > 10)
+    {
+        out += "... and " + intToString(total - 10) + " more.\n";
+    }
+
+    (void)savePreviousPosition(ed);
+    Position first;
+    hits.get(0, first);
+    ed.cursorLine = first.line;
+    ed.cursorCol = first.col;
+    clampCursor();
+
+    message = out;
+}
+
+// replace <old> <new> <n>: replace the n-th match (1-based).
+void EditorApp::cmdReplace(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 4)
+    {
+        message = appUsage("replace");
+        return;
+    }
+    if (ed.document.isEmpty())
+    {
+        message = "Error: the document is empty.";
+        return;
+    }
+
+    Token t;
+    tok.get(1, t);
+    std::string oldText = t.text;
+    tok.get(2, t);
+    std::string newText = t.text;
+
+    if (oldText.empty())
+    {
+        message = "Error: nothing to search for.";
+        return;
+    }
+
+    int n = 0;
+    tok.get(3, t);
+    if (!parsePositiveInt(t.text, n))
+    {
+        message = appUsage("replace");
+        return;
+    }
+
+    DynamicArray<Position> hits = searchAll(ed, oldText);
+    int total = hits.size();
+    if (total == 0)
+    {
+        message = "Not found.";
+        return;
+    }
+    if (n > total)
+    {
+        message = "Error: only " + intToString(total) + " occurrence(s) found.";
+        return;
+    }
+
+    Position where;
+    hits.get(n - 1, where);
+
+    OutputCapture cap;
+    bool ok = replaceOccurrence(ed, oldText, newText, n);
+    std::string captured = cap.getText();
+    if (ok)
+    {
+        message = "Replaced occurrence " + intToString(n) + " at line " + intToString(where.line + 1) + ", column " + intToString(where.col + 1) + ".";
+    }
+    else if (!captured.empty())
+    {
+        message = captured;
+    }
+    else
+    {
+        message = "Replace failed.";
+    }
+    clampCursor();
+}
+
+// replaceall <old> <new>: one undo step for the whole replacement.
+void EditorApp::cmdReplaceAll(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 3)
+    {
+        message = appUsage("replaceall");
+        return;
+    }
+    if (ed.document.isEmpty())
+    {
+        message = "Error: the document is empty.";
+        return;
+    }
+
+    Token t;
+    tok.get(1, t);
+    std::string oldText = t.text;
+    tok.get(2, t);
+    std::string newText = t.text;
+
+    if (oldText.empty())
+    {
+        message = "Error: nothing to search for.";
+        return;
+    }
+
+    DynamicArray<Position> hits = searchAll(ed, oldText);
+    if (hits.size() == 0)
+    {
+        message = "Not found.";
+        return;
+    }
+
+    OutputCapture cap;
+    int count = replaceAll(ed, oldText, newText);
+    std::string captured = cap.getText();
+    if (count == 0)
+    {
+        if (!captured.empty())
+            message = captured;
+        else
+            message = "Not found.";
+    }
+    else
+    {
+        message = "Replaced " + intToString(count) + " occurrence(s). (one undo step)";
+    }
+    clampCursor();
+}
+
+// ----- BOOKMARK handlers -----
+
+// mark <name>: save a bookmark at the cursor.
+void EditorApp::cmdMark(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 2)
+    {
+        message = appUsage("mark");
+        return;
+    }
+    if (ed.document.isEmpty())
+    {
+        message = "Error: the document is empty.";
+        return;
+    }
+
+    Token t;
+    tok.get(1, t);
+    std::string name = t.text;
+
+    if (name.empty())
+    {
+        message = appUsage("mark");
+        return;
+    }
+    if (name.length() >= 2 && name[0] == '_' && name[1] == '_')
+    {
+        message = "Error: names starting with '__' are reserved.";
+        return;
+    }
+    if (hasWhitespace(name))
+    {
+        message = "Error: bookmark names cannot contain spaces.";
+        return;
+    }
+    if (findBookmark(ed, name) != -1)
+    {
+        message = "A bookmark named " + name + " already exists.";
+        return;
+    }
+
+    clampCursor();
+    int line0 = ed.cursorLine;
+    int col0 = ed.cursorCol;
+
+    bool ok = addBookmarkAtCursor(ed, name);
+    if (ok)
+    {
+        message = "Bookmark " + name + " set at line " + intToString(line0 + 1) + ", column " + intToString(col0 + 1) + ".";
+    }
+    else
+    {
+        message = "Error: could not set bookmark.";
+    }
+}
+
+// marks: list bookmarks in the message area.
+void EditorApp::cmdMarks(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 1)
+    {
+        message = appUsage("marks");
+        return;
+    }
+    OutputCapture cap;
+    listBookmarks(ed, std::cout);
+    message = cap.getText();
+}
+
+// jump <name>: save the current position, then move to the named bookmark.
+void EditorApp::cmdJump(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 2)
+    {
+        message = appUsage("jump");
+        return;
+    }
+    if (ed.document.isEmpty())
+    {
+        message = "Error: the document is empty.";
+        return;
+    }
+
+    Token t;
+    tok.get(1, t);
+    std::string name = t.text;
+
+    int index = findBookmark(ed, name);
+    if (index == -1)
+    {
+        message = "Bookmark " + name + " not found.";
+        return;
+    }
+    if (name.length() >= 2 && name[0] == '_' && name[1] == '_')
+    {
+        message = "Bookmark " + name + " not found.";
+        return;
+    }
+
+    Bookmark target;
+    if (!ed.bookmarks.get(index, target))
+    {
+        message = "Bookmark " + name + " not found.";
+        return;
+    }
+
+    (void)savePreviousPosition(ed);
+    bool ok = gotoBookmark(ed, name);
+    if (ok)
+    {
+        message = "Jumped to " + name + " (line " + intToString(target.line + 1) + ", column " + intToString(target.col + 1) + ").";
+    }
+    else
+    {
+        message = "Error: could not jump to " + name + ".";
+    }
+    clampCursor();
+}
+
+// unmark <name>: remove a bookmark.
+void EditorApp::cmdUnmark(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 2)
+    {
+        message = appUsage("unmark");
+        return;
+    }
+
+    Token t;
+    tok.get(1, t);
+    std::string name = t.text;
+
+    if (findBookmark(ed, name) == -1)
+    {
+        message = "Bookmark " + name + " not found.";
+        return;
+    }
+    bool ok = removeBookmark(ed, name);
+    if (ok)
+        message = "Bookmark " + name + " removed.";
+    else
+        message = "Error: could not remove " + name + ".";
+}
+
+// back: return to the saved previous position.
+void EditorApp::cmdBack(const DynamicArray<Token> &tok)
+{
+    if (tok.size() != 1)
+    {
+        message = appUsage("back");
+        return;
+    }
+
+    bool ok = returnToPreviousPosition(ed);
+    if (!ok)
+    {
+        message = "No previous position saved.";
+        return;
+    }
+
+    clampCursor();
+    message = "Returned to line " + intToString(ed.cursorLine + 1) + ", column " + intToString(ed.cursorCol + 1) + ".";
 }
