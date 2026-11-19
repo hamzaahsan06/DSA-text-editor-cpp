@@ -3,10 +3,8 @@
 #include <fstream>
 #include <iostream>
 
-// Write every line to path, each one ending with '\n'. Returns false on any I/O error.
-// Ending every line (including the last) is what lets openFile read back exactly
-// the same number of lines: without it, a trailing empty line would be lost.
-// Walks nodes via getHead()/next so the whole save is O(n).
+// Writes the document as plain text, keeping empty and trailing lines intact.
+// Walking the linked list directly keeps saving O(n).
 static bool writeToFile(Editor &ed, const std::string &path)
 {
     std::ofstream out(path.c_str());
@@ -19,7 +17,13 @@ static bool writeToFile(Editor &ed, const std::string &path)
         out << cur->data.text << '\n';
     }
     out.flush();
-    return out.good();
+    if (!out.good())
+        return false;
+
+    // Check close too: some write failures are only reported when the stream
+    // flushes its final buffer during close.
+    out.close();
+    return !out.fail();
 }
 
 bool newDocument(Editor &ed)
@@ -46,14 +50,15 @@ bool openFile(Editor &ed, const std::string &path)
         return false;
     }
 
-    // Read into a temporary list so a failed read never destroys the document.
+    // Build the replacement separately so a failed read leaves the current
+    // document, cursor, history, and metadata untouched.
     DoublyLinkedList<Line> temp;
     std::string lineText;
     while (std::getline(in, lineText))
     {
         if (!lineText.empty() && lineText[lineText.size() - 1] == '\r')
             lineText.erase(lineText.size() - 1);
-        
+
         Line l;
         l.text = lineText;
         temp.insertAtTail(l);
@@ -64,16 +69,14 @@ bool openFile(Editor &ed, const std::string &path)
         return false;
     }
 
-    // The file was read completely, so from here on nothing can fail.
-    // An empty file becomes one empty line, same as a new document.
+    // An empty file becomes one editable empty line, matching a new document.
     if (temp.isEmpty())
     {
         Line blank;
         temp.insertAtTail(blank);
     }
 
-    // Replace the document and drop everything that referred to the old one:
-    // undoing into a different file would corrupt the editor.
+    // Install the new content and discard state that refers to the old file.
     ed.document = temp;
     ed.undoStack.clear();
     ed.redoStack.clear();

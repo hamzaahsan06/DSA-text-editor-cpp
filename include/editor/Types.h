@@ -71,4 +71,6 @@ struct Command
     FormatType fmtType = BOLD;
     // REPLACE commands with this flag store complete line snapshots in oldText/newText.
     bool wholeLine = false;
+    // INSERT_LINE commands with this flag represent splitting an existing line.
+    bool lineSplit = false;
 };
