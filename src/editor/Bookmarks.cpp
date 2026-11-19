@@ -322,3 +322,123 @@ void adjustBookmarksOnLineDelete(Editor &ed, int deletedLine)
         }
     }
 }
+
+// Adjust bookmarks when a line is split at (line, col).
+// Bookmarks on `line` at col >= split move down and shift left.
+// Bookmarks below `line` move down by one.
+void adjustBookmarksOnSplit(Editor &ed, int line, int col)
+{
+    if (line < 0 || col < 0)
+    {
+        return;
+    }
+    int total = ed.bookmarks.size();
+    for (int i = 0; i < total; ++i)
+    {
+        Bookmark current;
+        if (!ed.bookmarks.get(i, current))
+        {
+            continue;
+        }
+        if (current.line == line && current.col >= col)
+        {
+            current.line += 1;
+            current.col -= col;
+            ed.bookmarks.set(i, current);
+        }
+        else if (current.line > line)
+        {
+            current.line += 1;
+            ed.bookmarks.set(i, current);
+        }
+    }
+}
+
+// Adjust bookmarks when the line below `line` is merged back into `line`.
+// Bookmarks on line+1 move up and shift right. Bookmarks below move up.
+void adjustBookmarksOnJoin(Editor &ed, int line, int col)
+{
+    if (line < 0 || col < 0)
+    {
+        return;
+    }
+    int total = ed.bookmarks.size();
+    for (int i = 0; i < total; ++i)
+    {
+        Bookmark current;
+        if (!ed.bookmarks.get(i, current))
+        {
+            continue;
+        }
+        if (current.line == line + 1)
+        {
+            current.line -= 1;
+            current.col += col;
+            ed.bookmarks.set(i, current);
+        }
+        else if (current.line > line + 1)
+        {
+            current.line -= 1;
+            ed.bookmarks.set(i, current);
+        }
+    }
+}
+
+// Copies every bookmark whose line is in [startLine, endLine] to `out`.
+void collectBookmarksInLines(Editor &ed, int startLine, int endLine, DynamicArray<Bookmark> &out)
+{
+    if (startLine < 0 || endLine < startLine)
+    {
+        return;
+    }
+    int total = ed.bookmarks.size();
+    for (int i = 0; i < total; ++i)
+    {
+        Bookmark current;
+        if (!ed.bookmarks.get(i, current))
+        {
+            continue;
+        }
+        if (current.line >= startLine && current.line <= endLine)
+        {
+            out.pushBack(current);
+        }
+    }
+}
+
+// Restores saved bookmarks. Skips existing names and non-existent lines.
+// Clamps columns past the end of the line.
+void restoreBookmarks(Editor &ed, const DynamicArray<Bookmark> &saved)
+{
+    int total = saved.size();
+    for (int i = 0; i < total; ++i)
+    {
+        Bookmark current;
+        if (!saved.get(i, current))
+        {
+            continue;
+        }
+        // Skip if a bookmark with this name already exists.
+        if (findBookmark(ed, current.name) != -1)
+        {
+            continue;
+        }
+        // Skip if the line does not exist.
+        if (current.line < 0 || current.line >= ed.getLineCount())
+        {
+            continue;
+        }
+        // Clamp column to the line length.
+        Line *line = ed.getLine(current.line);
+        if (line != nullptr && current.col > (int)line->text.length())
+        {
+            current.col = (int)line->text.length();
+        }
+        if (current.col < 0)
+        {
+            current.col = 0;
+        }
+        // Append directly (do not use addBookmark, to allow "__previous").
+        ed.bookmarks.pushBack(current);
+    }
+}

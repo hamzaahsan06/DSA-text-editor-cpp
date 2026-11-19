@@ -115,9 +115,6 @@ static void shiftSpansOnDelete(Line &line, int startCol, int endCol)
 }
 
 // Splits the spans of `first` at column `col` when its text is cut in two.
-// Spans ending at or before col stay on `first`; spans starting at or after col
-// move to `second` with their columns reduced by col; a span that crosses col is
-// cut into two pieces, one on each line.
 static void splitSpansAtColumn(Line &first, Line &second, int col)
 {
     DynamicArray<FormatSpan> keep;
@@ -173,15 +170,22 @@ bool insertText(Editor &ed, int line, int col, const std::string &text)
     if (!requireLine(ed, line) || !requireColumn(ed, line, col))
         return false;
 
+    Position cb;
+    cb.line = ed.cursorLine;
+    cb.col = ed.cursorCol;
+    Line before = *ed.getLine(line);
+
     Line *target = ed.getLine(line);
     target->text.insert(col, text);
     shiftSpansOnInsert(*target, col, static_cast<int>(text.size()));
 
-    UndoRedo history;
-    history.recordInsert(ed, line, col, text);
-
     ed.setModified(true);
     moveCursor(ed, line, col + static_cast<int>(text.size()));
+
+    UndoRedo history;
+    if (!history.recordLineEdit(ed, INSERT_TEXT, line, before, cb))
+        std::cout << "Warning: this change cannot be undone.\n";
+
     return true;
 }
 
@@ -192,29 +196,26 @@ bool insertNewLine(Editor &ed, int line, int col)
     if (!requireLine(ed, line) || !requireColumn(ed, line, col))
         return false;
 
-    Line *target = ed.getLine(line);
-    std::string originalText = target->text;
+    Position cb;
+    cb.line = ed.cursorLine;
+    cb.col = ed.cursorCol;
+    Line before = *ed.getLine(line);
 
+    Line *target = ed.getLine(line);
     Line below;
     below.text = target->text.substr(col);
     target->text.erase(col);
     splitSpansAtColumn(*target, below, col);
     ed.document.insertAtPosition(line + 1, below);
-    adjustBookmarksOnLineInsert(ed, line + 1);
-
-    // We record a single INSERT_LINE command.
-    // op.line = the original line.
-    // op.newText = the full original text (used to merge back on undo).
-    UndoRedo history;
-    Command op;
-    op.type = INSERT_LINE;
-    op.line = line;
-    op.col = col;
-    op.newText = originalText;
-    history.record(ed, op);
+    adjustBookmarksOnSplit(ed, line, col);
 
     ed.setModified(true);
     moveCursor(ed, line + 1, 0);
+
+    UndoRedo history;
+    if (!history.recordSplit(ed, line, col, before, cb))
+        std::cout << "Warning: this change cannot be undone.\n";
+
     return true;
 }
 
@@ -234,16 +235,22 @@ bool deleteText(Editor &ed, int line, int startCol, int endCol)
         return false;
     }
 
+    Position cb;
+    cb.line = ed.cursorLine;
+    cb.col = ed.cursorCol;
+    Line before = *ed.getLine(line);
+
     Line *target = ed.getLine(line);
-    std::string removed = target->text.substr(startCol, endCol - startCol);
     target->text.erase(startCol, endCol - startCol);
     shiftSpansOnDelete(*target, startCol, endCol);
 
-    UndoRedo history;
-    history.recordErase(ed, line, startCol, removed);
-
     ed.setModified(true);
     moveCursor(ed, line, startCol);
+
+    UndoRedo history;
+    if (!history.recordLineEdit(ed, DELETE_TEXT, line, before, cb))
+        std::cout << "Warning: this change cannot be undone.\n";
+
     return true;
 }
 
@@ -301,25 +308,29 @@ bool deleteLines(Editor &ed, int startLine, int endLine)
         return false;
     }
 
-    // Gather the text BEFORE removing the lines.
-    std::string removedText;
-    for (int i = startLine; i <= endLine; ++i)
+    Position cb;
+    cb.line = ed.cursorLine;
+    cb.col = ed.cursorCol;
+
+    // Copy the lines block
+    DynamicArray<Line> deletedLines;
+    DoublyLinkedList<Line>::Node *cur = ed.document.getHead();
+    for (int i = 0; i < startLine && cur != nullptr; ++i)
     {
-        Line *l = ed.getLine(i);
-        if (l != nullptr)
-        {
-            if (i > startLine)
-                removedText += '\n';
-            removedText += l->text;
-        }
+        cur = cur->next;
+    }
+    int count = endLine - startLine + 1;
+    for (int i = 0; i < count && cur != nullptr; ++i)
+    {
+        deletedLines.pushBack(cur->data);
+        cur = cur->next;
     }
 
-    UndoRedo history;
-    // recordDeleteLine checks that line < getLineCount()
-    if (!history.recordDeleteLine(ed, startLine, removedText))
-        return false;
+    // Collect bookmarks in the lines about to be deleted
+    DynamicArray<Bookmark> removedBookmarks;
+    collectBookmarksInLines(ed, startLine, endLine, removedBookmarks);
 
-    int count = endLine - startLine + 1;
+    // Do the deletion
     for (int i = 0; i < count; ++i)
     {
         Line removed;
@@ -333,5 +344,10 @@ bool deleteLines(Editor &ed, int startLine, int endLine)
         moveCursor(ed, 0, 0);
     else
         moveCursor(ed, startLine < remaining ? startLine : remaining - 1, 0);
+
+    UndoRedo history;
+    if (!history.recordDeleteLines(ed, startLine, deletedLines, removedBookmarks, cb))
+        std::cout << "Warning: this change cannot be undone.\n";
+
     return true;
 }
