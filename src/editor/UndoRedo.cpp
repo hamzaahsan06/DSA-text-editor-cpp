@@ -154,22 +154,20 @@ static bool applyUndo(Editor &ed, const Command &op)
 
     if (op.type == INSERT_LINE)
     {
-        // If newText is not empty, this was a line split (TextOps::insertNewLine).
-        // We must merge the two lines back together.
-        if (!op.newText.empty())
+        // A split restores the original line and removes the line below it.
+        if (op.lineSplit)
         {
             if (line == nullptr)
                 return false;
             Line *nextLine = ed.getLine(op.line + 1);
-            if (nextLine != nullptr)
-            {
-                line->text = op.newText; // Restore the merged text
-                Line dummy;
-                ed.document.removeAtPosition(op.line + 1, dummy);
-            }
+            if (nextLine == nullptr)
+                return false;
+            line->text = op.newText;
+            Line dummy;
+            ed.document.removeAtPosition(op.line + 1, dummy);
             return true;
         }
-        // Normal empty line insert undo
+        // Ordinary line insertion removes the line at the recorded index.
         if (line == nullptr)
             return false;
         Line removed;
@@ -226,8 +224,8 @@ static bool applyRedo(Editor &ed, const Command &op)
 
     if (op.type == INSERT_LINE)
     {
-        // If newText is not empty, it was a split. Re-split it.
-        if (!op.newText.empty())
+        // Re-split the original line at the recorded column.
+        if (op.lineSplit)
         {
             if (line == nullptr)
                 return false;

@@ -168,17 +168,27 @@ bool insertText(Editor &ed, int line, int col, const std::string &text)
         std::cout << "Error: text cannot contain a newline; use insert new line.\n";
         return false;
     }
+    const bool createdFirstLine = isDocumentEmpty(ed);
     if (!openEmptyDocument(ed, line, col))
         return false;
     if (!requireLine(ed, line) || !requireColumn(ed, line, col))
         return false;
 
     Line *target = ed.getLine(line);
+    UndoRedo history;
+    if (!history.recordInsert(ed, line, col, text))
+    {
+        if (createdFirstLine)
+        {
+            Line discarded;
+            ed.document.removeAtPosition(0, discarded);
+        }
+        std::cout << "Error: could not record the edit in undo history.\n";
+        return false;
+    }
+
     target->text.insert(col, text);
     shiftSpansOnInsert(*target, col, static_cast<int>(text.size()));
-
-    UndoRedo history;
-    history.recordInsert(ed, line, col, text);
 
     ed.setModified(true);
     moveCursor(ed, line, col + static_cast<int>(text.size()));
@@ -187,6 +197,7 @@ bool insertText(Editor &ed, int line, int col, const std::string &text)
 
 bool insertNewLine(Editor &ed, int line, int col)
 {
+    const bool createdFirstLine = isDocumentEmpty(ed);
     if (!openEmptyDocument(ed, line, col))
         return false;
     if (!requireLine(ed, line) || !requireColumn(ed, line, col))
@@ -195,23 +206,31 @@ bool insertNewLine(Editor &ed, int line, int col)
     Line *target = ed.getLine(line);
     std::string originalText = target->text;
 
-    Line below;
-    below.text = target->text.substr(col);
-    target->text.erase(col);
-    splitSpansAtColumn(*target, below, col);
-    ed.document.insertAtPosition(line + 1, below);
-    adjustBookmarksOnLineInsert(ed, line + 1);
-
-    // We record a single INSERT_LINE command.
-    // op.line = the original line.
-    // op.newText = the full original text (used to merge back on undo).
+    // Record first so a full undo stack cannot leave an untracked edit.
     UndoRedo history;
     Command op;
     op.type = INSERT_LINE;
     op.line = line;
     op.col = col;
     op.newText = originalText;
-    history.record(ed, op);
+    op.lineSplit = true;
+    if (!history.record(ed, op))
+    {
+        if (createdFirstLine)
+        {
+            Line discarded;
+            ed.document.removeAtPosition(0, discarded);
+        }
+        std::cout << "Error: could not record the edit in undo history.\n";
+        return false;
+    }
+
+    Line below;
+    below.text = target->text.substr(col);
+    target->text.erase(col);
+    splitSpansAtColumn(*target, below, col);
+    ed.document.insertAtPosition(line + 1, below);
+    adjustBookmarksOnLineInsert(ed, line + 1);
 
     ed.setModified(true);
     moveCursor(ed, line + 1, 0);
@@ -236,11 +255,16 @@ bool deleteText(Editor &ed, int line, int startCol, int endCol)
 
     Line *target = ed.getLine(line);
     std::string removed = target->text.substr(startCol, endCol - startCol);
-    target->text.erase(startCol, endCol - startCol);
-    shiftSpansOnDelete(*target, startCol, endCol);
 
     UndoRedo history;
-    history.recordErase(ed, line, startCol, removed);
+    if (!history.recordErase(ed, line, startCol, removed))
+    {
+        std::cout << "Error: could not record the edit in undo history.\n";
+        return false;
+    }
+
+    target->text.erase(startCol, endCol - startCol);
+    shiftSpansOnDelete(*target, startCol, endCol);
 
     ed.setModified(true);
     moveCursor(ed, line, startCol);
