@@ -47,26 +47,27 @@ enum OpType
 {
     INSERT_TEXT,
     DELETE_TEXT,
-    INSERT_LINE,
-    DELETE_LINE,
     REPLACE,
+    REPLACE_ALL,
+    SPLIT_LINE,
+    DELETE_LINES,
     FORMAT_APPLY,
     FORMAT_REMOVE
 };
 
-// Represents a single undoable action in the editor.
-// The fields used depend on type: text-based operations use
-// line/col/oldText/newText, while formatting operations use
-// line/fmtStart/fmtEnd/fmtType. Both stacks (undo and redo)
-// share this same record type.
+// Represents a single undoable action in the editor using snapshots.
 struct Command
 {
     OpType type = INSERT_TEXT;
-    int line = 0;
-    int col = 0;
-    std::string oldText = ""; // Text before the operation (used to undo).
-    std::string newText = ""; // Text after the operation (used to redo).
-    int fmtStart = 0;
-    int fmtEnd = 0;
-    FormatType fmtType = BOLD;
+    int startLine = 0;
+    
+    DynamicArray<Line> before;
+    DynamicArray<Line> after;
+    
+    Position cursorBefore;
+    Position cursorAfter;
+    
+    int splitCol = 0;
+    
+    DynamicArray<Bookmark> removedBookmarks;
 };

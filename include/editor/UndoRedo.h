@@ -5,30 +5,21 @@
 #include "editor/Types.h"
 #include "editor/Editor.h"
 
-// Records undoable commands and performs undo/redo on the document.
-// Each successful edit pushes one Command onto undoStack and clears
-// redoStack. Undo moves the top command to redoStack; redo moves it back.
+// Manages undo/redo history using snapshots of blocks of lines.
 class UndoRedo
 {
 public:
-    // Pushes op onto undoStack and clears redoStack.
-    bool record(Editor &ed, const Command &op);
+    // Records a single-line in-place edit.
+    bool recordLineEdit(Editor &ed, OpType type, int line, const Line &before, Position cursorBefore);
 
-    // Records an insert at (line, col).
-    bool recordInsert(Editor &ed, int line, int col, const std::string &text);
+    // Records a block of lines being replaced by a new block.
+    bool recordBlockEdit(Editor &ed, OpType type, int startLine, const DynamicArray<Line> &before, int afterCount, Position cursorBefore);
 
-    // Records an erase at (line, col).
-    bool recordErase(Editor &ed, int line, int col, const std::string &erasedText);
+    // Records a line being split into two.
+    bool recordSplit(Editor &ed, int line, int col, const Line &beforeLine, Position cursorBefore);
 
-    // Records a replace at (line, col).
-    bool recordReplace(Editor &ed, int line, int col,
-                       const std::string &oldText, const std::string &newText);
-
-    // Records inserting a new line at line index, using the given text.
-    bool recordInsertLine(Editor &ed, int line, const std::string &text);
-
-    // Records deleting the line at line index, keeping its old text.
-    bool recordDeleteLine(Editor &ed, int line, const std::string &oldText);
+    // Records a block of lines being deleted.
+    bool recordDeleteLines(Editor &ed, int startLine, const DynamicArray<Line> &deletedLines, const DynamicArray<Bookmark> &removedBookmarks, Position cursorBefore);
 
     // Reverts the most recent command.
     bool undo(Editor &ed);

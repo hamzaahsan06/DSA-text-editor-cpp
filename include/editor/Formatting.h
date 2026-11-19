@@ -3,18 +3,17 @@
 
 #include <string>
 #include "editor/Types.h"
-#include "ds/DynamicArray.h"
 
-class Formatting {
-private:
-    DynamicArray<FormatSpan> spans;
+// Adds a format span [startCol, endCol) to the line's formats. O(n).
+bool addFormat(Line &line, int startCol, int endCol, bool isBold, bool isItalic);
 
-public:
-    bool addFormat(int startCol, int endCol, bool isBold, bool isItalic);
-    bool removeFormat(int index);
-    void clearFormats();
-    int count() const;
-    std::string applyFormatting(const std::string& lineText) const;
-};
+// Removes the format span at the given 0-based index. O(n).
+bool removeFormat(Line &line, int spanIndex);
+
+// Removes all format spans from the line. O(1).
+void clearFormats(Line &line);
+
+// Renders the line, applying ANSI codes or markdown-style fallback. O(n*m).
+std::string renderLine(const Line &line, bool useAnsi);
 
 #endif

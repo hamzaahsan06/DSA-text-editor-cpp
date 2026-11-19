@@ -48,3 +48,20 @@ void adjustBookmarksOnLineInsert(Editor &ed, int insertedLine);
 
 // Removes/shrinks bookmarks when a line is deleted at deletedLine.
 void adjustBookmarksOnLineDelete(Editor &ed, int deletedLine);
+
+// NEW: Adjust bookmarks when a line is split at (line, col).
+// Bookmarks on `line` at col >= split move to line+1 with col reduced.
+// Bookmarks on lines below `line` move down by one.
+void adjustBookmarksOnSplit(Editor &ed, int line, int col);
+
+// NEW: Adjust bookmarks when the line below `line` is merged back into `line`
+// at column `col`. This is the exact inverse of adjustBookmarksOnSplit.
+void adjustBookmarksOnJoin(Editor &ed, int line, int col);
+
+// NEW: Copies (does not remove) every bookmark whose line is in [startLine, endLine]
+// into `out`. Includes the hidden "__previous" slot.
+void collectBookmarksInLines(Editor &ed, int startLine, int endLine, DynamicArray<Bookmark> &out);
+
+// NEW: Restores saved bookmarks. Skips names that already exist, and skips
+// bookmarks whose line no longer exists. Clamps columns that are too long.
+void restoreBookmarks(Editor &ed, const DynamicArray<Bookmark> &saved);
