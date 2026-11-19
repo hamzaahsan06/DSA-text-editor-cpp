@@ -46,7 +46,7 @@ std::string Formatting::applyFormatting(const std::string& lineText) const {
             spans.get(j, s);
 
             // FormatSpan ranges are half-open: [startCol, endCol).
-            if (i >= s.startCol && i < s.endCol) {
+            if (i >= s.startCol && i <= s.endCol) {
                 if (s.type == BOLD || s.type == BOLD_ITALIC) bold = true;
                 if (s.type == ITALIC || s.type == BOLD_ITALIC) italic = true;
             }
